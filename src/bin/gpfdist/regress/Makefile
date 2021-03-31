@@ -29,7 +29,7 @@ watchdog:
 	sh test_watchdog.sh
 
 ipv4v6_ports:
-	./test_ipv4v6_port.sh
+	/bin/bash test_ipv4v6_port.sh
 
 clean:
 	rm -rf regression.* sql results expected

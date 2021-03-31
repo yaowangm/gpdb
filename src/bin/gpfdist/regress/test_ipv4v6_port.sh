@@ -40,6 +40,7 @@ function start_gpfdist()
 
 which nc
 if [ $? != 0 ];then 
+	echo -e "\033[32m nc command not supported, passed ipv4v6 test\033[0m"
 	exit 0
 fi
 
