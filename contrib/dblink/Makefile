@@ -13,7 +13,7 @@ SHLIB_LINK_INTERNAL = -Wl,--exclude-libs=libpq.a -Wl,-Bstatic $(libpq) -Wl,-Bdyn
 EXTENSION = dblink
 DATA = dblink--1.1.sql dblink--1.0--1.1.sql dblink--unpackaged--1.0.sql
 
-REGRESS = paths dblink
+REGRESS = paths dblink dblink_no_auth
 REGRESS_OPTS = --dlpath=$(top_builddir)/src/test/regress \
 	--create-role=dblink_regression_test
 EXTRA_CLEAN = sql/paths.sql expected/paths.out
