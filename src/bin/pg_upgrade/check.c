@@ -1383,7 +1383,7 @@ get_canonical_locale_name(int category, const char *locale)
 static void
 check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 {
-	FILE	   *script = NULL;
+	FILE		*script = NULL;
 	char		output_path[MAXPGPATH];
 	bool		found = false;
 
@@ -1412,11 +1412,12 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 			pg_fatal("Failed to connect to database %s\n", active_db->db_name);
 		}
 
-        // Detect any materialized view of append only mode with relfrozenxid != 0
+		// Detect any materialized view of append only mode with relfrozenxid != 0
 		res = executeQueryOrDie(conn,
-						        "SELECT relname, relfrozenxid "
-                                " FROM pg_catalog.pg_class "
-            	           		" WHERE relkind = 'm' AND reloptions = '{appendonly=true}' "
+								"SELECT relname, relfrozenxid "
+								" FROM pg_catalog.pg_class "
+								" WHERE relkind = 'm' "
+								" AND reloptions::text like '%%appendonly=true%%' "
 								" AND relfrozenxid::text <> '0'");
 		if (res == 0)
 		{
