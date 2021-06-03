@@ -1291,6 +1291,8 @@ SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc,
 		lock->nGranted = 0;
 		MemSet(lock->requested, 0, sizeof(int) * MAX_LOCKMODES);
 		MemSet(lock->granted, 0, sizeof(int) * MAX_LOCKMODES);
+		// By default, holdTillEndXact is true only for LOCKTAG_TRANSACTION
+		lock->holdTillEndXact = locktag->locktag_type == LOCKTAG_TRANSACTION;
 		LOCK_PRINT("LockAcquire: new", lock, lockmode);
 	}
 	else
@@ -1299,6 +1301,18 @@ SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc,
 		Assert((lock->nRequested >= 0) && (lock->requested[lockmode] >= 0));
 		Assert((lock->nGranted >= 0) && (lock->granted[lockmode] >= 0));
 		Assert(lock->nGranted <= lock->nRequested);
+	}
+
+	// holdTillEndXact must be true for LOCKTAG_TRANSACTION and
+	// false for LOCKTAG_RELATION_EXTEND no matter if it is a new lock or
+	// an existing lock
+	if(locktag->locktag_type == LOCKTAG_TRANSACTION)
+	{
+		Assert(lock->holdTillEndXact);
+	}
+	else if(locktag->locktag_type == LOCKTAG_RELATION_EXTEND)
+	{
+		Assert(!(lock->holdTillEndXact));
 	}
 
 	/*
@@ -2288,6 +2302,25 @@ LockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
 			 lockMethodTable->lockModeNames[lockmode]);
 		RemoveLocalLock(locallock);
 		return false;
+	}
+
+	// There are 3 possibilities for holdTillEndXact:
+	// 1. must be true for LOCKTAG_TRANSACTION
+	// 2. might be true or false for LOCKTAG_RELATION
+	// 3. must be false for others
+	if(locktag->locktag_type == LOCKTAG_TRANSACTION)
+	{
+		// must be true
+		Assert(lock->holdTillEndXact);
+	}
+	else if(locktag->locktag_type == LOCKTAG_RELATION)
+	{
+		// might be true or false, no assert
+	}
+	else
+	{
+		// must be false for others
+		Assert(!(lock->holdTillEndXact));
 	}
 
 	/*
