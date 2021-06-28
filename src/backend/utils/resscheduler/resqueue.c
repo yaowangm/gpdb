@@ -554,6 +554,8 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		return false;
 	}
 
+	LWLockAcquire(ResQueueLock, LW_EXCLUSIVE);
+
 	/*
 	 * Double-check that we are actually holding a lock of the type we want to
 	 * Release.
@@ -576,8 +578,6 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 	MemSet(&portalTag, 0, sizeof(ResPortalTag));
 	portalTag.pid = MyProc->pid;
 	portalTag.portalId = resPortalId;
-
-	LWLockAcquire(ResQueueLock, LW_EXCLUSIVE);
 
 	incrementSet = ResIncrementFind(&portalTag);
 	if (!incrementSet)
