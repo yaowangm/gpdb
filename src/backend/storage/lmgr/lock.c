@@ -1310,14 +1310,10 @@ SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc,
 	 * false for LOCKTAG_RELATION_EXTEND no matter if it is a new lock or
 	 * an existing lock
 	 */
-	if(locktag->locktag_type == LOCKTAG_TRANSACTION)
-	{
-		Assert(lock->holdTillEndXact);
-	}
-	else if(locktag->locktag_type == LOCKTAG_RELATION_EXTEND)
-	{
-		Assert(!(lock->holdTillEndXact));
-	}
+	AssertImply(locktag->locktag_type == LOCKTAG_TRANSACTION,
+				lock->holdTillEndXact);
+	AssertImply(locktag->locktag_type == LOCKTAG_RELATION_EXTEND,
+				!(lock->holdTillEndXact));
 
 	/*
 	 * Create the hash key for the proclock table.
