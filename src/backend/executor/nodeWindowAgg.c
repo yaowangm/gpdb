@@ -276,7 +276,7 @@ initialize_windowaggregate(WindowAggState *winstate,
 								  peraggstate->distinctLtOper,
 								  peraggstate->distinctColl,
 								  false, /* nullsFirstFlag */
-								  work_mem, false);
+								  PlanStateOperatorMemKB((PlanState *)winstate), false);
 	}
 }
 
@@ -1313,7 +1313,10 @@ begin_partition(WindowAggState *winstate)
 	}
 
 	/* Create new tuplestore for this partition */
-	winstate->buffer = tuplestore_begin_heap(false, false, work_mem);
+	winstate->buffer = tuplestore_begin_heap(
+		false,
+		false,
+		PlanStateOperatorMemKB((PlanState *)winstate));
 
 	/*
 	 * Set up read pointers for the tuplestore.  The current pointer doesn't

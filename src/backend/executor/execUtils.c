@@ -2418,7 +2418,7 @@ uint64 PlanStateOperatorMemKB(const PlanState *ps)
 		 * There are some statements that do not go through the resource queue and these
 		 * plans dont get decorated with the operatorMemKB. Someday, we should fix resource queues.
 		 */
-		result = work_mem;
+		result = statement_mem;
 	}
 	else
 	{
