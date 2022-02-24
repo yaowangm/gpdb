@@ -720,6 +720,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	result->dependsOnRole = glob->dependsOnRole;
 	result->parallelModeNeeded = glob->parallelModeNeeded;
 	result->planTree = top_plan;
+	result->queryStringTableForSeg = NULL;
 	result->numSlices = glob->numSlices;
 	result->slices = glob->slices;
 	result->rtable = glob->finalrtable;
