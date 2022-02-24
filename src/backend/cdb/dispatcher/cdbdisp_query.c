@@ -106,6 +106,10 @@ static int fillSliceVector(SliceTable *sliceTable,
 static char *buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 				   int *finalLen);
 
+void buildGpQueryStringForSegs(QueryDesc* queryDesc,
+								DispatchCommandQueryParms *pQueryParms,
+								Gang *gp);
+
 static DispatchCommandQueryParms *cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc, bool planRequiresTxn);
 static DispatchCommandQueryParms *cdbdisp_buildUtilityQueryParms(struct Node *stmt, int flags, List *oid_assignments);
 static DispatchCommandQueryParms *cdbdisp_buildCommandQueryParms(const char *strCommand, int flags);
@@ -1030,6 +1034,54 @@ buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 	return shared_query;
 }
 
+void buildGpQueryStringForSegs(QueryDesc* queryDesc,
+								DispatchCommandQueryParms *pQueryParms,
+								Gang *gp)
+{
+	int nsegments = 0;
+	long tableSize = 0;
+
+	if (queryDesc->plannedstmt->query_mem <= 0)return;
+    Assert(queryDesc->plannedstmt->queryStringTableForSeg != NULL);
+	tableSize = hash_get_num_entries(queryDesc->plannedstmt->queryStringTableForSeg);
+    Assert(tableSize == 0);
+
+	for(int i = 0;i < gp->size;i++)
+	{
+		bool found = false;
+		/* Get nsegments (number of primary segments on host) per seg */
+		SegmentDatabaseDescriptor *segdbDesc = gp->db_descriptors[i];
+
+		Assert(segdbDesc != NULL);
+		nsegments = segdbDesc->segment_database_info->hostSegs;
+		Assert(nsegments > 0);
+
+		QueryStringInfo *qs = (QueryStringInfo *)hash_search(
+								queryDesc->plannedstmt->queryStringTableForSeg,
+								(const void *)&nsegments,
+								HASH_ENTER,
+								&found);
+		if(found)continue;
+
+		/* Re-calculate OperatorMemoryKB by nsegments */
+		queryDesc->plannedstmt->query_mem /= nsegments;
+        switch(*gp_resmanager_memory_policy)
+        {    
+			case RESMANAGER_MEMORY_POLICY_AUTO:
+            	PolicyAutoAssignOperatorMemoryKB(queryDesc->plannedstmt,
+                                                     queryDesc->plannedstmt->query_mem);
+				break;
+			case RESMANAGER_MEMORY_POLICY_EAGER_FREE:
+				PolicyEagerFreeAssignOperatorMemoryKB(queryDesc->plannedstmt,
+                                                          queryDesc->plannedstmt->query_mem);
+				break;
+			default:
+				Assert(IsResManagerMemoryPolicyNone());
+				break;
+		}    
+	}
+}
+
 /*
  * This function is used for dispatching sliced plans
  */
@@ -1163,6 +1215,9 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 				break;
 		}
 		SIMPLE_FAULT_INJECTOR("before_one_slice_dispatched");
+
+    	/* Generate different query strings for different segs */
+		buildGpQueryStringForSegs(queryDesc, pQueryParms, primaryGang);
 
 		cdbdisp_dispatchToGang(ds, primaryGang, si);
 		if (planRequiresTxn || isDtxExplicitBegin())

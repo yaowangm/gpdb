@@ -644,9 +644,17 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 			if (estate->es_sliceTable->slices[0].gangType != GANGTYPE_UNALLOCATED ||
 				estate->es_sliceTable->slices[0].children)
 			{
+				/* Only when dispatching actually happens, we need to generate
+				 * different plan trees for different segs.
+				*/
+				InitQueryStringTableForSeg(&(queryDesc->plannedstmt->queryStringTableForSeg));
+
 				CdbDispatchPlan(queryDesc,
 								estate->es_param_exec_vals,
 								needDtx, true);
+
+				DestroyQueryStringTableForSeg(queryDesc->plannedstmt->queryStringTableForSeg);
+				queryDesc->plannedstmt->queryStringTableForSeg = NULL;
 			}
 
 			if (toplevelOidCache != NIL)

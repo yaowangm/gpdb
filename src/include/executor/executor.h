@@ -505,6 +505,12 @@ typedef struct TupOutputState
 	DestReceiver *dest;
 } TupOutputState;
 
+typedef struct QueryStringInfo
+{
+	char	*queryText;
+	int		queryTextLength;
+} QueryStringInfo;
+
 extern TupOutputState *begin_tup_output_tupdesc(DestReceiver *dest,
 												TupleDesc tupdesc,
 												const TupleTableSlotOps *tts_ops);
@@ -539,6 +545,8 @@ extern ExprContext *CreateWorkExprContext(EState *estate);
 extern ExprContext *CreateStandaloneExprContext(void);
 extern void FreeExprContext(ExprContext *econtext, bool isCommit);
 extern void ReScanExprContext(ExprContext *econtext);
+extern void InitQueryStringTableForSeg(HTAB **queryStringTableForSeg);
+extern void DestroyQueryStringTableForSeg(HTAB *queryStringTableForSeg);
 
 #define ResetExprContext(econtext) \
 	MemoryContextReset((econtext)->ecxt_per_tuple_memory)

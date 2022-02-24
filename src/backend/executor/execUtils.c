@@ -2320,3 +2320,29 @@ ExecGetReturningSlot(EState *estate, ResultRelInfo *relInfo)
 
 	return relInfo->ri_ReturningSlot;
 }
+
+void InitQueryStringTableForSeg(HTAB **queryStringTableForSeg)
+{
+    HASHCTL hash_ctl;
+
+	Assert(*queryStringTableForSeg == NULL);
+
+    /* Create the hash table */
+    MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+    hash_ctl.keysize = sizeof(int);
+    hash_ctl.entrysize = sizeof(struct QueryStringInfo*);
+    hash_ctl.hcxt = CurrentMemoryContext;
+    *queryStringTableForSeg = hash_create("QueryStringTableForSeg",
+		256L,
+		&hash_ctl,
+		HASH_ELEM | HASH_CONTEXT);
+}
+
+void DestroyQueryStringTableForSeg(HTAB *queryStringTableForSeg)
+{
+	Assert(queryStringTableForSeg != NULL);
+
+	/* Destroy each plan tree */
+
+	hash_destroy(queryStringTableForSeg);
+}

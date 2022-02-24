@@ -99,6 +99,11 @@ typedef struct PlannedStmt
 
 	struct Plan *planTree;		/* tree of Plan nodes */
 
+	/* A hash table accomodating set of plan trees for different kinds of segments.
+	Key is nsegments (number of primary segments on host), and entry is plan tree with
+	different query_mem/operatorMemKB */
+	struct HTAB *queryStringTableForSeg;
+
 	/* Slice table */
 	int			numSlices;
 	struct PlanSlice *slices;
