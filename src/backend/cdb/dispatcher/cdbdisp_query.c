@@ -1053,6 +1053,7 @@ void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 		bool found = false;
 		char       *queryText = NULL;
 		int         queryTextLength = 0;
+		int			queryMem = queryDesc->plannedstmt->query_mem;
 		DispatchCommandQueryParms *pQueryParms = NULL;
 		/* Get nsegments (number of primary segments on host) per seg */
 		SegmentDatabaseDescriptor *segdbDesc = gp->db_descriptors[i];
@@ -1072,16 +1073,14 @@ void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 		if(found)continue;
 
 		/* Re-calculate OperatorMemoryKB by nsegments */
-		queryDesc->plannedstmt->query_mem /= nsegments;
+		queryMem /= nsegments;
         switch(*gp_resmanager_memory_policy)
         {    
 			case RESMANAGER_MEMORY_POLICY_AUTO:
-            	PolicyAutoAssignOperatorMemoryKB(queryDesc->plannedstmt,
-                                                     queryDesc->plannedstmt->query_mem);
+            	PolicyAutoAssignOperatorMemoryKB(queryDesc->plannedstmt, queryMem);
 				break;
 			case RESMANAGER_MEMORY_POLICY_EAGER_FREE:
-				PolicyEagerFreeAssignOperatorMemoryKB(queryDesc->plannedstmt,
-                                                          queryDesc->plannedstmt->query_mem);
+				PolicyEagerFreeAssignOperatorMemoryKB(queryDesc->plannedstmt, queryMem);
 				break;
 			default:
 				Assert(IsResManagerMemoryPolicyNone());

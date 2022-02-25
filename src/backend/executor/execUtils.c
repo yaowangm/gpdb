@@ -2330,7 +2330,7 @@ void InitQueryStringTableForSeg(HTAB **queryStringTableForSeg)
     /* Create the hash table */
     MemSet(&hash_ctl, 0, sizeof(hash_ctl));
     hash_ctl.keysize = sizeof(int);
-    hash_ctl.entrysize = sizeof(struct QueryStringInfo*);
+    hash_ctl.entrysize = sizeof(struct QueryStringInfo);
     hash_ctl.hcxt = CurrentMemoryContext;
     *queryStringTableForSeg = hash_create("QueryStringTableForSeg",
 		256L,

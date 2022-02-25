@@ -315,18 +315,18 @@ cdbdisp_dispatchToGang_async(struct CdbDispatcherState *ds,
 		{
 			/* Get relevant query string for particular seg based on hostSegs
 			 * (number of primary segments on host) */
-			QueryStringInfo *qs = (QueryStringInfo*)hash_search(queryStringTableForSeg,
+			/* QueryStringInfo *qs = (QueryStringInfo*)hash_search(queryStringTableForSeg,
                                                &(segdbDesc->segment_database_info->hostSegs),
                                                HASH_FIND,
-                                               &found);
+                                               &found); */
 
 			/* The QueryStringInfo must exist in hash table */
-			Assert(found);
+			/*Assert(found);*/
 
-			cdbdisp_makeDispatchParams(ds,
+			/*cdbdisp_makeDispatchParams(ds,
 				ds->queryDesc->estate->es_sliceTable->numSlices,
 				qs->queryText,
-				qs->queryTextLength);
+				qs->queryTextLength); */
 		}
 
 		/*
