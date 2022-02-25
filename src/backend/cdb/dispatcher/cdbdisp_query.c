@@ -108,6 +108,7 @@ static char *buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 
 void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 								DispatchCommandQueryParms *pQueryParms,
+								bool planRequiresTxn,
 								Gang *gp);
 
 static DispatchCommandQueryParms *cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc, bool planRequiresTxn);
@@ -1036,12 +1037,13 @@ buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 
 void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 								DispatchCommandQueryParms *pQueryParms,
+								bool planRequiresTxn,
 								Gang *gp)
 {
 	int nsegments = 0;
 	long tableSize = 0;
 
-	if (queryDesc->plannedstmt->query_mem <= 0)return;
+	if (queryDesc->plannedstmt->query_mem <= 0 || !IsResGroupActivated())return;
     Assert(queryDesc->plannedstmt->queryStringTableForSeg != NULL);
 	tableSize = hash_get_num_entries(queryDesc->plannedstmt->queryStringTableForSeg);
     Assert(tableSize == 0);
@@ -1049,6 +1051,9 @@ void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 	for(int i = 0;i < gp->size;i++)
 	{
 		bool found = false;
+		char       *queryText = NULL;
+		int         queryTextLength = 0;
+		DispatchCommandQueryParms *pQueryParms = NULL;
 		/* Get nsegments (number of primary segments on host) per seg */
 		SegmentDatabaseDescriptor *segdbDesc = gp->db_descriptors[i];
 
@@ -1056,6 +1061,9 @@ void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 		nsegments = segdbDesc->segment_database_info->hostSegs;
 		Assert(nsegments > 0);
 
+		/* We don't need to generate QueryStringInfo for each seg actually;
+		 * Just generate different QueryStringInfo for different nsegments
+		 */
 		QueryStringInfo *qs = (QueryStringInfo *)hash_search(
 								queryDesc->plannedstmt->queryStringTableForSeg,
 								(const void *)&nsegments,
@@ -1078,7 +1086,12 @@ void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 			default:
 				Assert(IsResManagerMemoryPolicyNone());
 				break;
-		}    
+		}
+    	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, planRequiresTxn);
+	    queryText = buildGpQueryString(pQueryParms, &queryTextLength);
+
+		qs->queryText = queryText;
+		qs->queryTextLength = queryTextLength;
 	}
 }
 
@@ -1217,7 +1230,7 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 		SIMPLE_FAULT_INJECTOR("before_one_slice_dispatched");
 
     	/* Generate different query strings for different segs */
-		buildGpQueryStringForSegs(queryDesc, pQueryParms, primaryGang);
+		buildGpQueryStringForSegs(queryDesc, pQueryParms, planRequiresTxn, primaryGang);
 
 		cdbdisp_dispatchToGang(ds, primaryGang, si);
 		if (planRequiresTxn || isDtxExplicitBegin())
