@@ -18,6 +18,7 @@
 
 #include "cdb/cdbtm.h"
 #include "utils/resowner.h"
+#include "executor/execdesc.h"
 
 #define CDB_MOTION_LOST_CONTACT_STRING "Interconnect error master lost contact with segment."
 
@@ -51,6 +52,7 @@ typedef struct CdbDispatcherState
 	bool isGangDestroying;
 #endif
 	bool destroyIdleReaderGang;
+	QueryDesc *queryDesc;
 } CdbDispatcherState;
 
 typedef struct DispatcherInternalFuncs

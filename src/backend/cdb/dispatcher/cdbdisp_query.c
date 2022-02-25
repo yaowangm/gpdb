@@ -1138,6 +1138,7 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 	 * Notice: This must be done before cdbdisp_buildPlanQueryParms
 	 */
 	AssignGangs(ds, queryDesc);
+	ds->queryDesc = queryDesc;
 
 	/*
 	 * Traverse the slice tree in sliceTbl rooted at rootIdx and build a
