@@ -94,6 +94,7 @@
 #include "utils/metrics_utils.h"
 
 #include "cdb/memquota.h"
+#include "utils/hsearch.h"
 
 static bool tlist_matches_tupdesc(PlanState *ps, List *tlist, Index varno, TupleDesc tupdesc);
 static void ShutdownExprContext(ExprContext *econtext, bool isCommit);
@@ -2327,12 +2328,12 @@ void InitQueryStringTableForSeg(HTAB **queryStringTableForSeg)
 
 	Assert(*queryStringTableForSeg == NULL);
 
-    /* Create the hash table */
-    MemSet(&hash_ctl, 0, sizeof(hash_ctl));
-    hash_ctl.keysize = sizeof(int);
-    hash_ctl.entrysize = sizeof(struct QueryStringInfo);
-    hash_ctl.hcxt = CurrentMemoryContext;
-    *queryStringTableForSeg = hash_create("QueryStringTableForSeg",
+	/* Create the hash table */
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = sizeof(int);
+	hash_ctl.entrysize = sizeof(QueryStringInfo);
+	hash_ctl.hcxt = CurrentMemoryContext;
+	*queryStringTableForSeg = hash_create("QueryStringTableForSeg",
 		256L,
 		&hash_ctl,
 		HASH_ELEM | HASH_CONTEXT);
@@ -2346,3 +2347,4 @@ void DestroyQueryStringTableForSeg(HTAB *queryStringTableForSeg)
 
 	hash_destroy(queryStringTableForSeg);
 }
+

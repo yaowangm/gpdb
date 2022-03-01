@@ -1090,7 +1090,7 @@ void buildGpQueryStringForSegs(QueryDesc* queryDesc,
 	    queryText = buildGpQueryString(pQueryParms, &queryTextLength);
 
 		qs->queryText = queryText;
-		qs->queryTextLength = queryTextLength;
+		qs->queryTextLength = queryTextLength; 
 	}
 }
 

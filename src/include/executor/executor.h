@@ -507,6 +507,7 @@ typedef struct TupOutputState
 
 typedef struct QueryStringInfo
 {
+	int		nsegments;
 	char	*queryText;
 	int		queryTextLength;
 } QueryStringInfo;
