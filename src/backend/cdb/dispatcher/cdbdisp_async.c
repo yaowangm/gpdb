@@ -298,7 +298,14 @@ cdbdisp_dispatchToGang_async(struct CdbDispatcherState *ds,
 	int			i;
 
 	CdbDispatchCmdAsync *pParms = (CdbDispatchCmdAsync *) ds->dispatchParams;
-	HTAB *queryStringTableForSeg = ds->queryDesc->plannedstmt->queryStringTableForSeg;
+	HTAB *queryStringTableForSeg = NULL;
+
+	if(ds->queryDesc != NULL && ds->queryDesc->plannedstmt->queryStringTableForSeg != NULL)
+	{
+		queryStringTableForSeg = ds->queryDesc->plannedstmt->queryStringTableForSeg;
+		long tableSize = hash_get_num_entries(queryStringTableForSeg);
+		Assert(tableSize > 0);
+	}
 
 	/*
 	 * Start the dispatching
@@ -313,20 +320,21 @@ cdbdisp_dispatchToGang_async(struct CdbDispatcherState *ds,
 
 		if(queryStringTableForSeg != NULL)
 		{
+			int hostSegs = segdbDesc->segment_database_info->hostSegs;
 			/* Get relevant query string for particular seg based on hostSegs
 			 * (number of primary segments on host) */
-			/* QueryStringInfo *qs = (QueryStringInfo*)hash_search(queryStringTableForSeg,
-                                               &(segdbDesc->segment_database_info->hostSegs),
+			QueryStringInfo *qs = (QueryStringInfo*)hash_search(queryStringTableForSeg,
+                                               &hostSegs,
                                                HASH_FIND,
-                                               &found); */
+                                               &found);
 
 			/* The QueryStringInfo must exist in hash table */
-			/*Assert(found);*/
+			Assert(found);
 
-			/*cdbdisp_makeDispatchParams(ds,
+			cdbdisp_makeDispatchParams(ds,
 				ds->queryDesc->estate->es_sliceTable->numSlices,
 				qs->queryText,
-				qs->queryTextLength); */
+				qs->queryTextLength);
 		}
 
 		/*
