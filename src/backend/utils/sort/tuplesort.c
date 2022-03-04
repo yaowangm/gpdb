@@ -1957,7 +1957,11 @@ tuplesort_gettuple_common(Tuplesortstate *state, bool forward,
 
 		case TSS_SORTEDONTAPE:
 			Assert(forward || state->randomAccess);
-			Assert(state->slabAllocatorUsed);
+			/* 
+			 * If sorting has been interrupted by QueryFinishPending,
+			 * state->slabAllocatorUsed might not be true.
+			 */
+			Assert(state->slabAllocatorUsed || QueryFinishPending);
 
 			/*
 			 * The slot that held the tuple that we returned in previous
@@ -2593,6 +2597,12 @@ mergeruns(Tuplesortstate *state)
 	RESUME_INTERRUPTS();
 #endif
 
+	if (QueryFinishPending)
+	{
+		state->status = TSS_SORTEDONTAPE;
+		return;
+	}
+
 	Assert(state->status == TSS_BUILDRUNS);
 	Assert(state->memtupcount == 0);
 
@@ -2734,6 +2744,13 @@ mergeruns(Tuplesortstate *state)
 			   state->tp_dummy[state->tapeRange - 1])
 		{
 			bool		allDummy = true;
+
+			if (QueryFinishPending)
+			{
+				/* pretend we are done */
+				state->status = TSS_SORTEDONTAPE;
+				return;
+			}
 
 			for (tapenum = 0; tapenum < state->tapeRange; tapenum++)
 			{
@@ -3485,8 +3502,10 @@ getlen(Tuplesortstate *state, int tapenum, bool eofOK)
 {
 	unsigned int len;
 
+	/* If QueryFinishPending is true, EOF is expected. */
 	if (LogicalTapeRead(state->tapeset, tapenum,
-						&len, sizeof(len)) != sizeof(len))
+						&len, sizeof(len)) != sizeof(len)
+		&& !QueryFinishPending)
 		elog(ERROR, "unexpected end of tape");
 	if (len == 0 && !eofOK)
 		elog(ERROR, "unexpected end of data");

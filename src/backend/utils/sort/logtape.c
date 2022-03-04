@@ -976,7 +976,14 @@ LogicalTapeRead(LogicalTapeSet *lts, int tapenum,
 	size_t		nread = 0;
 	size_t		nthistime;
 
-	Assert(tapenum >= 0 && tapenum < lts->nTapes);
+	Assert((tapenum >= 0 && tapenum < lts->nTapes) || QueryFinishPending);
+
+	/* If QueryFinishPending is true, return EOF immediatelly. */
+	if(QueryFinishPending)
+	{
+		return nread;
+	}
+
 	lt = &lts->tapes[tapenum];
 	Assert(!lt->writing);
 
