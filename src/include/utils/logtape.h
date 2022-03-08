@@ -62,6 +62,8 @@ extern void LogicalTapeSetClose(LogicalTapeSet *lts);
 extern void LogicalTapeSetForgetFreeSpace(LogicalTapeSet *lts);
 extern size_t LogicalTapeRead(LogicalTapeSet *lts, int tapenum,
 							  void *ptr, size_t size);
+extern size_t LogicalTapeReadInternal(LogicalTapeSet *lts, int tapenum,
+					void *ptr, size_t size, bool isEofOnQueryFinishAcceptable);
 extern void LogicalTapeWrite(LogicalTapeSet *lts, int tapenum,
 							 void *ptr, size_t size);
 extern void LogicalTapeRewindForRead(LogicalTapeSet *lts, int tapenum,

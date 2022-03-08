@@ -3492,24 +3492,18 @@ reversedirection(Tuplesortstate *state)
 static unsigned int
 getlen(Tuplesortstate *state, int tapenum, bool eofOK)
 {
-	unsigned int len;
-	size_t readLen = 0;
+	unsigned int len = 0;
 
-	readLen = LogicalTapeRead(state->tapeset, tapenum, &len, sizeof(len));
-	if(readLen != sizeof(len))
-	{
-		/* EOF returned */
-		if(readLen == 0)
-		{
-			/* If eofOK or QueryFinishPending is true, EOF is expected. */
-			if(!eofOK && !QueryFinishPending)
-				elog(ERROR, "unexpected EOF");
-		}
-		else
-		{
-			elog(ERROR, "unexpected end of data");
-		}
-	}
+	/*
+	 * If LogicalTapeReadInternal() returned EOF and QueryFinishPending
+	 * is false, we must hit an error.
+	*/
+	if (LogicalTapeReadInternal(state->tapeset, tapenum,
+						&len, sizeof(len), eofOK) != sizeof(len)
+		&& !QueryFinishPending)
+		elog(ERROR, "unexpected end of tape");
+	if (len == 0 && !eofOK)
+		elog(ERROR, "unexpected end of data");
 	return len;
 }
 

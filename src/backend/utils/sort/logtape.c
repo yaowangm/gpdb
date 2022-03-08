@@ -964,13 +964,30 @@ LogicalTapeRewindForWrite(LogicalTapeSet *lts, int tapenum)
 }
 
 /*
- * Read from a logical tape.
+ * Wrapper function of LogicalTapeReadInternal()
  *
- * Early EOF is indicated by return value less than #bytes requested.
+ * isEofOnQueryFinishAcceptable is always false to indicate that EOF is
+ * NOT acceptable when QueryFinishPending is true.
  */
 size_t
 LogicalTapeRead(LogicalTapeSet *lts, int tapenum,
 				void *ptr, size_t size)
+{
+	return LogicalTapeReadInternal(lts, tapenum, ptr, size, false);
+}
+
+/*
+ * Read from a logical tape.
+ *
+ * Early EOF is indicated by return value less than #bytes requested.
+ *
+ * Parameter isEofOnQueryFinishAcceptable indicates whether EOF is accpetable
+ * when QueryFinishPending is true. For the case, the function will return
+ * EOF immediately without trying any read work.
+ */
+size_t
+LogicalTapeReadInternal(LogicalTapeSet *lts, int tapenum,
+					void *ptr, size_t size, bool isEofOnQueryFinishAcceptable)
 {
 	LogicalTape *lt;
 	size_t		nread = 0;
@@ -978,8 +995,11 @@ LogicalTapeRead(LogicalTapeSet *lts, int tapenum,
 
 	Assert((tapenum >= 0 && tapenum < lts->nTapes) || QueryFinishPending);
 
-	/* If QueryFinishPending is true, return EOF immediatelly. */
-	if(QueryFinishPending)
+	/*
+	 * If QueryFinishPending is true, and EOF is acceptable, return EOF
+	 * immediatelly. Otherwise, ignore QueryFinishPending and continue.
+	*/
+	if(QueryFinishPending && isEofOnQueryFinishAcceptable)
 	{
 		return nread;
 	}
