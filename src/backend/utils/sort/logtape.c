@@ -998,7 +998,7 @@ LogicalTapeReadInternal(LogicalTapeSet *lts, int tapenum,
 	/*
 	 * If QueryFinishPending is true, and EOF is acceptable, return EOF
 	 * immediatelly. Otherwise, ignore QueryFinishPending and continue.
-	*/
+	 */
 	if(QueryFinishPending && isEofOnQueryFinishAcceptable)
 	{
 		return nread;
