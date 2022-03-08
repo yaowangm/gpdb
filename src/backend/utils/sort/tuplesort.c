@@ -1957,7 +1957,7 @@ tuplesort_gettuple_common(Tuplesortstate *state, bool forward,
 
 		case TSS_SORTEDONTAPE:
 			Assert(forward || state->randomAccess);
-			/* 
+			/*
 			 * If sorting has been interrupted by QueryFinishPending,
 			 * state->slabAllocatorUsed might not be true.
 			 */
@@ -3499,7 +3499,7 @@ getlen(Tuplesortstate *state, int tapenum, bool eofOK)
 	 * is false, we must hit an error.
 	*/
 	if (LogicalTapeReadInternal(state->tapeset, tapenum,
-						&len, sizeof(len), eofOK) != sizeof(len)
+								&len, sizeof(len), eofOK) != sizeof(len)
 		&& !QueryFinishPending)
 		elog(ERROR, "unexpected end of tape");
 	if (len == 0 && !eofOK)
