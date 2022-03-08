@@ -2574,14 +2574,6 @@ mergeruns(Tuplesortstate *state)
 	int			numTapes;
 	int			numInputTapes;
 
-	/* GPDB_12_MERGE_FIXME: This fault injection point is here to placate
-	 * the query_finish_pending test. This used to be only in tuplesort_mk.c,
-	 * not here. This makes the test pass, but it's a bit fake, because we
-	 * don't actually have any checks for QueryFinishPending in tuplesort.c,
-	 * like we used to in tuplesort_mk.c. That means that sort will not
-	 * respond quickly to a query finish interrupt. Should we sprinkle some
-	 * QueryFinishPending checks in this file?
-	 */
 #ifdef FAULT_INJECTOR
 
 	/*
