@@ -1404,7 +1404,7 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 		DbInfo	   *active_db = &cluster->dbarr.dbs[dbnum];
 		PGconn	   *conn = connectToServer(cluster, active_db->db_name);
 		PGresult   *res;
-		int			ntups = 0, i_relname = 0, i_relfxid = 0;
+		int			ntups = 0, i_relname = 0, i_relfxid = 0, i_nspname = 0;
 
 		fprintf(script, "Checking database: %s\n", active_db->db_name);
 		if (conn == NULL)
@@ -1414,11 +1414,13 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 
 		// Detect any materialized view of append only mode with relfrozenxid != 0
 		res = executeQueryOrDie(conn,
-								"SELECT relname, relfrozenxid "
-								" FROM pg_catalog.pg_class "
-								" WHERE relkind = 'm' "
-								" AND reloptions::text like '%%appendonly=true%%' "
-								" AND relfrozenxid::text <> '0'");
+								"select tb.relname, tb.relfrozenxid, tbsp.nspname "
+								" from pg_catalog.pg_class tb "
+								" left join pg_catalog.pg_namespace tbsp "
+								" on tb.relnamespace = tbsp.oid "
+								" where tb.relkind = 'm' "
+								" and tb.reloptions::text like '%%appendonly=true%%' "
+								" and tb.relfrozenxid::text <> '0';");
 		if (res == 0)
 		{
 			pg_fatal("Failed to query pg_catalog.pg_class on database \"%s\"\n",
@@ -1435,12 +1437,16 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 			found = true;
 			i_relname = PQfnumber(res, "relname");
 			i_relfxid = PQfnumber(res, "relfrozenxid");
+			i_nspname = PQfnumber(res, "nspname");
 			for (int rowno = 0; rowno < ntups; rowno++)
 			{
 				fprintf(script,
-						"Detected view: %s, relfrozenxid: %s\n",
+						"Detected view: %s, relfrozenxid: %s\n"
+						"Try to fix it by issuing \"REFRESH MATERIALIZED VIEW %s.%s\"\n",
 						PQgetvalue(res, rowno, i_relname),
-						PQgetvalue(res, rowno, i_relfxid));
+						PQgetvalue(res, rowno, i_relfxid),
+						PQgetvalue(res, rowno, i_nspname),
+						PQgetvalue(res, rowno, i_relname));
 			}
 			fprintf(script, "%d problematical view(s) detected.\n\n", ntups);
 		}
@@ -1455,7 +1461,8 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 				"Note: A materialized view of append only mode must have invalid\n"
 				"relfrozenxid (0). However, view(s) with valid relfrozenxid was\n"
 				"detected.\n"
-				"Try to fix it by issuing \"REFRESH MATERIALIZED VIEW <viewname>\"\n"
+				"Try to fix it by issuing \"REFRESH MATERIALIZED VIEW "
+				"<schemaname>.<viewname>\"\n"
 				"with latest code and run the upgrading again.\n");
 	}
 
@@ -1464,7 +1471,7 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 
 	if(found)
 	{
-		pg_fatal("Detected appendonly materialized view with valid relfrozenxid.\n"
+		pg_fatal("Detected appendonly materialized view with incorrect relfrozenxid.\n"
 					"See %s for details.\n",
 					output_path);
 	}
