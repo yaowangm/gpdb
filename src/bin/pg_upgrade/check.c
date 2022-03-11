@@ -1412,14 +1412,15 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 			pg_fatal("Failed to connect to database %s\n", active_db->db_name);
 		}
 
-		// Detect any materialized view of append only mode with relfrozenxid != 0
+		// Detect any materialized view of append only mode (relstorage is
+		// RELSTORAGE_AOROWS or RELSTORAGE_AOCOLS) with relfrozenxid != 0
 		res = executeQueryOrDie(conn,
 								"select tb.relname, tb.relfrozenxid, tbsp.nspname "
 								" from pg_catalog.pg_class tb "
 								" left join pg_catalog.pg_namespace tbsp "
 								" on tb.relnamespace = tbsp.oid "
 								" where tb.relkind = 'm' "
-								" and tb.reloptions::text like '%%appendonly=true%%' "
+								" and (tb.relstorage = 'a' or tb.relstorage = 'c') "
 								" and tb.relfrozenxid::text <> '0';");
 		if (res == 0)
 		{
@@ -1463,7 +1464,7 @@ check_for_appendonly_materialized_view_with_relfrozenxid(ClusterInfo *cluster)
 				"detected.\n"
 				"Try to fix it by issuing \"REFRESH MATERIALIZED VIEW "
 				"<schemaname>.<viewname>\"\n"
-				"with latest code and run the upgrading again.\n");
+				"with latest GPDB 6 release and run the upgrading again.\n");
 	}
 
 	if (script)
