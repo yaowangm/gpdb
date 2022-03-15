@@ -3493,15 +3493,27 @@ static unsigned int
 getlen(Tuplesortstate *state, int tapenum, bool eofOK)
 {
 	unsigned int len = 0;
+	size_t readLen = 0;
 
 	/*
-	 * If LogicalTapeReadInternal() returned EOF and QueryFinishPending
-	 * is false, we must hit an error.
-	*/
-	if (LogicalTapeReadInternal(state->tapeset, tapenum,
-								&len, sizeof(len), eofOK) != sizeof(len)
-		&& !QueryFinishPending)
+	 * If LogicalTapeReadInternal() was interrupted by QueryFinishPending
+	 * and returned EOF, both readLen and len must be 0.
+	 * We need to error out for two cases:
+	 * 1. readLen != sizeof(len) (the reading was not completed), and 
+	 *    readLen != 0 (it's NOT interrupted by QueryFinishPending).
+	 * 2. readLen == 0 ((the reading was not completed)), and
+	 *    QueryFinishPending is false (it's NOT interrupted by
+	 *    QueryFinishPending).
+	 */
+	readLen = LogicalTapeReadInternal(state->tapeset, tapenum,
+								&len, sizeof(len), eofOK);
+	if ((readLen != sizeof(len) && readLen != 0)
+		|| (readLen == 0 && !QueryFinishPending))
 		elog(ERROR, "unexpected end of tape");
+
+	/*
+	 * If len == 0, but EOF is not expected, error out.
+	 */
 	if (len == 0 && !eofOK)
 		elog(ERROR, "unexpected end of data");
 	return len;
