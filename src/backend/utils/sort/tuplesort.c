@@ -3031,6 +3031,24 @@ dumptuples(Tuplesortstate *state, bool alltuples)
 	memtupwrite = state->memtupcount;
 	for (i = 0; i < memtupwrite; i++)
 	{
+#ifdef FAULT_INJECTOR
+		/*
+		 * We're injecting an interrupt here. We have to hold interrupts while we're
+		 * injecting it to make sure the interrupt is not handled within the fault
+		 * injector itself.
+		 */
+		HOLD_INTERRUPTS();
+		FaultInjector_InjectFaultIfSet("execsort_dumptuples",
+										DDLNotSpecified,
+										"", //databaseName
+										""); // tableName
+		RESUME_INTERRUPTS();
+#endif
+
+		if (QueryFinishPending)
+		{
+			break;
+		}
 		WRITETUP(state, state->tp_tapenum[state->destTape],
 				 &state->memtuples[i]);
 		state->memtupcount--;
@@ -3326,6 +3344,22 @@ sort_bounded_heap(Tuplesortstate *state)
 	while (state->memtupcount > 1)
 	{
 		SortTuple	stup = state->memtuples[0];
+
+#ifdef FAULT_INJECTOR
+		/*
+		 * We're injecting an interrupt here. We have to hold interrupts while we're
+		 * injecting it to make sure the interrupt is not handled within the fault
+		 * injector itself.
+		 */
+		HOLD_INTERRUPTS();
+		FaultInjector_InjectFaultIfSet("execsort_sort_bounded_heap",
+										DDLNotSpecified,
+										"", //databaseName
+										""); // tableName
+		RESUME_INTERRUPTS();
+#endif
+
+		if (QueryFinishPending)break;
 
 		/* this sifts-up the next-largest entry and decreases memtupcount */
 		tuplesort_heap_delete_top(state);
