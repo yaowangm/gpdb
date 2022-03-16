@@ -16,7 +16,6 @@
 #ifndef LOGTAPE_H
 #define LOGTAPE_H
 
-#include <signal.h>
 #include "storage/sharedfileset.h"
 
 /* LogicalTapeSet is an opaque type whose details are not known outside logtape.c. */
@@ -62,8 +61,6 @@ extern void LogicalTapeSetClose(LogicalTapeSet *lts);
 extern void LogicalTapeSetForgetFreeSpace(LogicalTapeSet *lts);
 extern size_t LogicalTapeRead(LogicalTapeSet *lts, int tapenum,
 							  void *ptr, size_t size);
-extern size_t LogicalTapeReadInternal(LogicalTapeSet *lts, int tapenum,
-					void *ptr, size_t size, bool isEofOnQueryFinishAcceptable);
 extern void LogicalTapeWrite(LogicalTapeSet *lts, int tapenum,
 							 void *ptr, size_t size);
 extern void LogicalTapeRewindForRead(LogicalTapeSet *lts, int tapenum,
@@ -79,7 +76,5 @@ extern void LogicalTapeSeek(LogicalTapeSet *lts, int tapenum,
 extern void LogicalTapeTell(LogicalTapeSet *lts, int tapenum,
 							long *blocknum, int *offset);
 extern long LogicalTapeSetBlocks(LogicalTapeSet *lts);
-
-extern PGDLLIMPORT volatile sig_atomic_t QueryFinishPending;
 
 #endif							/* LOGTAPE_H */
