@@ -1911,6 +1911,11 @@ tuplesort_gettuple_common(Tuplesortstate *state, bool forward,
 
 	/*
 	 * No output if we are told to finish execution.
+	 *
+	 * Note that the sort operation might (or might not) have been interrupted by
+	 * QueryFinishPending previously (see the code of checking 
+	 * QueryFinishPending), so there might not be valid tuples to be returned for
+	 * now. Return false to indicate "no more tuples" anyway.
 	 */
 	if (QueryFinishPending)
 	{
@@ -2588,11 +2593,12 @@ mergeruns(Tuplesortstate *state)
 	HOLD_INTERRUPTS();
 	FaultInjector_InjectFaultIfSet("execsort_sort_mergeruns",
 								   DDLNotSpecified,
-								   "", //databaseName
+								   "", // databaseName
 								   ""); // tableName
 	RESUME_INTERRUPTS();
 #endif
 
+	/* pretend we are done */
 	if (QueryFinishPending)
 	{
 		state->status = TSS_SORTEDONTAPE;
@@ -3040,7 +3046,7 @@ dumptuples(Tuplesortstate *state, bool alltuples)
 		HOLD_INTERRUPTS();
 		FaultInjector_InjectFaultIfSet("execsort_dumptuples",
 										DDLNotSpecified,
-										"", //databaseName
+										"", // databaseName
 										""); // tableName
 		RESUME_INTERRUPTS();
 #endif
@@ -3354,12 +3360,15 @@ sort_bounded_heap(Tuplesortstate *state)
 		HOLD_INTERRUPTS();
 		FaultInjector_InjectFaultIfSet("execsort_sort_bounded_heap",
 										DDLNotSpecified,
-										"", //databaseName
+										"", // databaseName
 										""); // tableName
 		RESUME_INTERRUPTS();
 #endif
 
-		if (QueryFinishPending)break;
+		if (QueryFinishPending)
+		{
+			break;
+		}
 
 		/* this sifts-up the next-largest entry and decreases memtupcount */
 		tuplesort_heap_delete_top(state);
