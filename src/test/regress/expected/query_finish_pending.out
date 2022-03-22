@@ -61,7 +61,7 @@ select gp_inject_fault('execsort_dumptuples', 'status', 2);
  
 (1 row)
 
--- ORCA does not trigger sort_bounded_heap() with a Sort node underneath it.
+-- ORCA does not trigger sort_bounded_heap() in following queries
 set optimizer=off;
 select gp_inject_fault('execsort_sort_bounded_heap', 'reset', 2);
  gp_inject_fault 
