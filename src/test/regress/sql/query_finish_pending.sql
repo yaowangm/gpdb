@@ -29,7 +29,7 @@ select gp_inject_fault('execsort_sort_bounded_heap', 'reset', 2);
 select gp_inject_fault('execsort_sort_bounded_heap', 'finish_pending', 2);
 
 -- return results although sort will be interrupted in one of the segments 
-select S from (select row_number() over(partition by i1 order by i2) AS T, count(*) over (partition by i1) AS S from _tmp_table) AS TMP order by S limit 3;
+select i1 from _tmp_table order by i2 limit 3;
 
 select gp_inject_fault('execsort_sort_bounded_heap', 'status', 2);
 
