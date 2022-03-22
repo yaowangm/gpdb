@@ -24,6 +24,9 @@ select DISTINCT S from (select row_number() over(partition by i1 order by i2) AS
 
 select gp_inject_fault('execsort_dumptuples', 'status', 2);
 
+-- ORCA does not trigger sort_bounded_heap() with a Sort node underneath it.
+set optimizer=off;
+
 select gp_inject_fault('execsort_sort_bounded_heap', 'reset', 2);
 -- set QueryFinishPending=true in sort_bounded_heap. This will stop sort.
 select gp_inject_fault('execsort_sort_bounded_heap', 'finish_pending', 2);
