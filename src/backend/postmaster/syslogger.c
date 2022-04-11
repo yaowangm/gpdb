@@ -1249,25 +1249,6 @@ int syslogger_write_str(const char *data, int len, bool amsyslogger, bool csv)
 		syslogger_write_to_logfile(amsyslogger, data + start, cnt - start);
 	}
 
-	cnt = 0;
-    while (cnt < len && data[cnt] != '\0')
-    {
-        if (csv && data[cnt] == '"')
-		{
-			if (amsyslogger)
-				write_syslogger_file_binary("\"", 1, LOG_DESTINATION_STDERR);
-			else
-				ignore_returned_result(write(fileno(stderr), "\"", 1));
-		}
-		
-		if (amsyslogger)
-			write_syslogger_file_binary(data+cnt, 1, LOG_DESTINATION_STDERR);
-		else
-			ignore_returned_result(write(fileno(stderr), data+cnt, 1));
-
-        cnt+=1;
-    }
-
     return cnt;
 }
 
