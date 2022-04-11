@@ -1188,12 +1188,46 @@ syslogger_append_current_timestamp(bool amsyslogger)
  */
 int syslogger_write_str(const char *data, int len, bool amsyslogger, bool csv)
 {
-    int cnt = 0;
+    int cnt = 0, start = 0;
 
     /* avoid confusing an empty string with NULL */
     if (data == NULL)
+	{
         return 0;
+	}
 
+	while(cnt < len && data[cnt] != '\0'){
+		if(csv && data[cnt] == '"')
+		{
+			/* Write previous substring */
+			if(start <= cnt){
+				if (amsyslogger)
+					write_syslogger_file_binary(data + start, cnt - start + 1, LOG_DESTINATION_STDERR);
+				else
+					ignore_returned_result(write(fileno(stderr), data + start, cnt - start + 1));
+			}
+
+			/* Write an additional "\"" */ 
+			if (amsyslogger)
+				write_syslogger_file_binary("\"", 1, LOG_DESTINATION_STDERR);
+			else
+				ignore_returned_result(write(fileno(stderr), "\"", 1));
+
+			/* Set new start of next substring */
+			start = cnt + 1;
+		}
+		cnt++;
+	} 
+
+	/* Write latest substring if any */
+	if(start < cnt){
+		if (amsyslogger)
+			write_syslogger_file_binary(data + start, cnt - start + 1, LOG_DESTINATION_STDERR);
+		else
+			ignore_returned_result(write(fileno(stderr), data + start, cnt - start + 1));
+	}
+
+	cnt = 0;
     while (cnt < len && data[cnt] != '\0')
     {
         if (csv && data[cnt] == '"')
