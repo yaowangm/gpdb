@@ -1,6 +1,6 @@
--- Smoke tests for syslogger (since GP syslogger code is dvergent from upstream)
+-- Smoke tests for syslogger (since GP syslogger code is divergent from upstream)
 
-create or replace function get_log_master(log_message text)
+create or replace function log_and_retrieve_master(log_message text)
 returns table (log_msg text) as
 $$
 declare
@@ -27,9 +27,9 @@ begin
 end;
 $$ language plpgsql;
 
-select get_log_master('message with a " mark');
-select get_log_master('message with two "" mark');
-select get_log_master('message with three """ mark');
-select get_log_master('message with foo"');
-select get_log_master('message with ""foo""bar"');
-select get_log_master('message with no quotes');
+select log_and_retrieve_master('message with a " mark');
+select log_and_retrieve_master('message with two "" mark');
+select log_and_retrieve_master('message with three """ mark');
+select log_and_retrieve_master('message with foo"');
+select log_and_retrieve_master('message with ""foo""bar"');
+select log_and_retrieve_master('message with no quotes');
