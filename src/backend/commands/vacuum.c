@@ -2733,6 +2733,39 @@ vacuum_params_to_options_list(VacuumParams *params)
      * dispatch the vacuum request to QEs as distributed transaction). We have no plan
      * for GPDB7, and will determine the approach in future based on feedback
      * from customer.
+	 *
+	 * More tech details about distributed auto vacuum for future reference:
+	 *
+	 * What's the benefits of the distributed auto vacuum? It might be better global
+	 * consistency because local auto vacuum happens in different times and different
+	 * transactions. We can also expect relieving performance jitter theoretically if
+	 * we can control cluster-size auto vacuum. In addition, we may be able to clean
+	 * some code because the code of local auto vacuum and distributed user-invoked
+	 * vacuum are inter-laying for now.
+	 *
+	 * What's the disadvantages? There might be possible troubles to align to upstream
+	 * vacuum codes since PG vacuum always happens locally. Importing more complexity
+	 * is another concern.
+	 *
+	 * In MPP setting it's kind of expected all nodes will have a similar activity or
+	 * bloat on the table (especially catalog tables should have the same effect on all
+	 * segments), though that's not really true for OLTP user tables. Hence making the
+	 * global decision to vacuum a table or not, instead of local can become
+	 * disadvantageous. For example, only one segment has heavy bloat on a table and
+	 * the rest of the segments are not. Global/distributed vacuum unnecessarily will
+	 * trigger on all segments even if not required.
+	 *
+	 * A possible solution is a kind of unbalanced strategy: when a distributed auto
+	 * vacuum is triggered, we don't need to perform actual vacuum on all segments. A
+	 * segment can determine not to perform actual vacuum if it has heavy bloat. Since
+	 * auto vacuum is repeated, the vacuum is supposed to be finished at sometime with
+	 * light workload in future. There might also be space for more complex scheduling
+	 * strategy of distributed auto vacuum based on performance monitoring.
+	 *
+	 * Calculating freeze limit and such irrespective needs to happen locally on each
+	 * segment. As globally on distributed transactions IDs are relevant. How
+	 * distributed transaction ID maps to local transaction ID on each segment is only
+	 * known to that segment. So, nothing to save there.
 	 */
 	if (params->truncate == VACOPT_TERNARY_DISABLED)
 		options = lappend(options, makeDefElem("truncate", (Node *) makeInteger(0), -1));
