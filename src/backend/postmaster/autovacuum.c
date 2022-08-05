@@ -61,13 +61,13 @@
  */
 
 /*-------------------------------------------------------------------------
- * GPDB: distributed auto vacuum
+ * GPDB:
  *
  * Distributed auto vacuum means to trigger auto vacuum on QD, and QD
  * manages to dispatch the vacuum request to QEs as distributed transaction.
  *
  * In GPDB there is no distributed auto vacuum yet. For now, all auto vaccums
- * happens on segments locally and do not interact with other auto vaccums.
+ * happen on segments locally and do not interact with other auto vaccums.
  *
  * GPDB team had a detailed discussion about distributed auto vacuum. We have
  * no plan for GPDB7, and will determine the approach in future based on

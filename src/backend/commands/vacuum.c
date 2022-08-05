@@ -2728,11 +2728,10 @@ vacuum_params_to_options_list(VacuumParams *params)
 	 * We should consider dispatch these values only if we do vacuum
 	 * as how we do analyze through autovacuum on coordinator.
 	 *
-	 * GPDB team had a detailed discussion about distributed auto vacuum (do vacuum
-	 * as how we do analyze, i.e. to trigger auto vacuum on QD, and QD manages to
-	 * dispatch the vacuum request to QEs as distributed transaction). We have no plan
-	 * for GPDB7, and will determine the approach in future based on feedback
-	 * from customer. See more details in the head comments of autovacuum.c.
+	 * GPDB has no plan to support distributed auto vacuum (do vacuum as how we do
+	 * analyze, i.e. to trigger auto vacuum on QD, and QD manages to dispatch the
+	 * vacuum request to QEs as distributed transaction) for GPDB7.
+	 * See more details in the head comments of autovacuum.c.
 	*/
 	if (params->truncate == VACOPT_TERNARY_DISABLED)
 		options = lappend(options, makeDefElem("truncate", (Node *) makeInteger(0), -1));
