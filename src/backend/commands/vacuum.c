@@ -2713,7 +2713,7 @@ vacuum_params_to_options_list(VacuumParams *params)
 
 	/*
 	 * NOTE:
-     *
+	 *
 	 * User-invoked vacuum will never have special values for VacuumParams's
 	 * freeze_min_age, freeze_table_age, multixact_freeze_min_age,
 	 * multixact_freeze_table_age, is_wraparound and log_min_duration. So no need
@@ -2727,46 +2727,13 @@ vacuum_params_to_options_list(VacuumParams *params)
 	 *
 	 * We should consider dispatch these values only if we do vacuum
 	 * as how we do analyze through autovacuum on coordinator.
-     *
-     * GPDB team had a detailed discussion about distributed auto vacuum (do vacuum
-     * as how we do analyze, i.e. to trigger auto vacuum on QD, and QD manages to
-     * dispatch the vacuum request to QEs as distributed transaction). We have no plan
-     * for GPDB7, and will determine the approach in future based on feedback
-     * from customer.
 	 *
-	 * More tech details about distributed auto vacuum for future reference:
-	 *
-	 * What's the benefits of the distributed auto vacuum? It might be better global
-	 * consistency because local auto vacuum happens in different times and different
-	 * transactions. We can also expect relieving performance jitter theoretically if
-	 * we can control cluster-size auto vacuum. In addition, we may be able to clean
-	 * some code because the code of local auto vacuum and distributed user-invoked
-	 * vacuum are inter-laying for now.
-	 *
-	 * What's the disadvantages? There might be possible troubles to align to upstream
-	 * vacuum codes since PG vacuum always happens locally. Importing more complexity
-	 * is another concern.
-	 *
-	 * In MPP setting it's kind of expected all nodes will have a similar activity or
-	 * bloat on the table (especially catalog tables should have the same effect on all
-	 * segments), though that's not really true for OLTP user tables. Hence making the
-	 * global decision to vacuum a table or not, instead of local can become
-	 * disadvantageous. For example, only one segment has heavy bloat on a table and
-	 * the rest of the segments are not. Global/distributed vacuum unnecessarily will
-	 * trigger on all segments even if not required.
-	 *
-	 * A possible solution is a kind of unbalanced strategy: when a distributed auto
-	 * vacuum is triggered, we don't need to perform actual vacuum on all segments. A
-	 * segment can determine not to perform actual vacuum if it has heavy bloat. Since
-	 * auto vacuum is repeated, the vacuum is supposed to be finished at sometime with
-	 * light workload in future. There might also be space for more complex scheduling
-	 * strategy of distributed auto vacuum based on performance monitoring.
-	 *
-	 * Calculating freeze limit and such irrespective needs to happen locally on each
-	 * segment. As globally on distributed transactions IDs are relevant. How
-	 * distributed transaction ID maps to local transaction ID on each segment is only
-	 * known to that segment. So, nothing to save there.
-	 */
+	 * GPDB team had a detailed discussion about distributed auto vacuum (do vacuum
+	 * as how we do analyze, i.e. to trigger auto vacuum on QD, and QD manages to
+	 * dispatch the vacuum request to QEs as distributed transaction). We have no plan
+	 * for GPDB7, and will determine the approach in future based on feedback
+	 * from customer. See more details in the head comments of autovacuum.c.
+	*/
 	if (params->truncate == VACOPT_TERNARY_DISABLED)
 		options = lappend(options, makeDefElem("truncate", (Node *) makeInteger(0), -1));
 	else if (params->truncate == VACOPT_TERNARY_ENABLED)
