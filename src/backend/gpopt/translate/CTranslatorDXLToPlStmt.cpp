@@ -3003,8 +3003,6 @@ CTranslatorDXLToPlStmt::TranslateDXLSort(
 	Plan *plan = &(sort->plan);
 	plan->plan_node_id = m_dxl_to_plstmt_context->GetNextPlanId();
 
-	CDXLPhysicalSort *sort_dxlop =
-		CDXLPhysicalSort::Cast(sort_dxlnode->GetOperator());
 
 	// translate operator costs
 	TranslatePlanCosts(sort_dxlnode, plan);
@@ -3031,9 +3029,6 @@ CTranslatorDXLToPlStmt::TranslateDXLSort(
 							   output_context);
 
 	plan->lefttree = child_plan;
-
-	// set sorting info
-	sort->noduplicates = sort_dxlop->FDiscardDuplicates();
 
 	// translate sorting columns
 
