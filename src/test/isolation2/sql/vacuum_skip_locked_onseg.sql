@@ -11,6 +11,10 @@
 0U: LOCK vacuum_tbl IN SHARE MODE;
 
 -- Issue vacuum with SKIP_LOCKED option
+-- Note that some ANALYZE options are disabled here because the ANALYZE
+-- try to acquire sample on segments and block. It is acceptable on
+-- GPDB. See the comments in isolation/specs/vacuum-skip-locked.spec.
+
 2: VACUUM (SKIP_LOCKED) vacuum_tbl;
 --2: ANALYZE (SKIP_LOCKED) vacuum_tbl;
 --2: VACUUM (ANALYZE, SKIP_LOCKED) vacuum_tbl;
@@ -23,10 +27,13 @@
 0U: LOCK vacuum_tbl IN ACCESS EXCLUSIVE MODE;
 
 -- Issue vacuum with SKIP_LOCKED option
--- Note that some ANALYZE options are ignored here because the ANALYZE
--- try to acquire inherited sample on segments and block. It is acceptable
--- on GPDB. See the comments in isolation/specs/vacuum-skip-locked.spec.
+-- Note that some ANALYZE options are disabled here because the ANALYZE
+-- try to acquire sample on segments and block. It is acceptable on
+-- GPDB. See the comments in isolation/specs/vacuum-skip-locked.spec.
+
 2: VACUUM (SKIP_LOCKED) vacuum_tbl;
+--2: ANALYZE (SKIP_LOCKED) vacuum_tbl;
+--2: VACUUM (ANALYZE, SKIP_LOCKED) vacuum_tbl;
 2: VACUUM (SKIP_LOCKED, FULL) vacuum_tbl;
 
 0U: COMMIT;
