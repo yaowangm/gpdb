@@ -9,7 +9,7 @@ setup
 	CREATE TABLE part1 PARTITION OF parted FOR VALUES IN (1);
 	CREATE TABLE part2 PARTITION OF parted FOR VALUES IN (2);
 
-	CREATE TABLE parted_ao (a INT) with (appendonly=true, orientation=column)
+	CREATE TABLE parted_ao (a INT) using ao_column
 		distributed by (a) PARTITION BY LIST (a);
 	CREATE TABLE part1_ao PARTITION OF parted_ao FOR VALUES IN (1);
 	CREATE TABLE part2_ao PARTITION OF parted_ao FOR VALUES IN (2);
