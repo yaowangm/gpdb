@@ -98,8 +98,39 @@ typedef struct
 
 }	QueueStatusContext;
 
+enum ResLockAcquireStatus
+{
+	RQA_NOT_STARTED_OR_DONE,
+	RQA_STARTED,
+	RQA_LOCALLOCK_READY,
+	RQA_LOCK_READY,
+	RQA_PROCLOCK_READY,
+	RQA_LOCK_NOT_AVAIL,
+	RQA_GRANT_LOCK,
+	RQA_WAIT_ON_LOCK,
+	RQA_LOCK_LIMIT_UPDATED,
+	RQA_STATISTICS_UPDATED
+};
+
+enum ResLockReleaseStatus
+{
+	RQR_NOT_STARTED_OR_DONE,
+	RQR_STARTED,
+	RQR_LOCKS_EXISTING_CHECKED,
+	RQR_SHARED_TABLED_CHECKED,
+	RQR_LOCK_HOLD_CHECKED,
+	RQR_INCREMENT_FOUND,
+	RQR_LOCK_UNGRANTED,
+	RQR_LOCK_LIMIT_UPDATED,
+	RQR_LOCK_CLEANED
+};
+
+static enum ResLockAcquireStatus resLockAcquireStatus = RQA_NOT_STARTED_OR_DONE;
+static enum ResLockReleaseStatus resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
+
 static void BuildQueueStatusContext(QueueStatusContext *fctx);
 
+void DumpResQueueLockInfo(LOCALLOCK *locallock, bool acquireRqLock);
 
 /*
  * ResLockAcquire -- acquire a resource lock.
@@ -143,6 +174,17 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 	int			status;
 	ResIncrementAddStatus addStatus;
 
+	if (resLockAcquireStatus != RQA_NOT_STARTED_OR_DONE)
+	{
+		elog(LOG,
+			 "Resource queue %d: previous ResLockAcquire() interrupted, "
+			 " status = %d",
+			 locktag->locktag_field1,
+			 resLockAcquireStatus);
+	}
+
+	resLockAcquireStatus = RQA_STARTED;
+
 	/* Setup the lock method bits. */
 	Assert(locktag->locktag_lockmethodid == RESOURCE_LOCKMETHOD);
 
@@ -179,6 +221,8 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 		locallock->lockOwners = (LOCALLOCKOWNER *)
 			MemoryContextAlloc(TopMemoryContext, locallock->maxLockOwners * sizeof(LOCALLOCKOWNER));
 	}
+
+	resLockAcquireStatus = RQA_LOCALLOCK_READY;
 
 	/* We are going to examine the shared lock table. */
 	hashcode = locallock->hashcode;
@@ -225,6 +269,8 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 		Assert((lock->nGranted >= 0) && (lock->granted[lockmode] >= 0));
 		Assert(lock->nGranted <= lock->nRequested);
 	}
+
+	resLockAcquireStatus = RQA_LOCK_READY;
 
 	/*
 	 * Create the hash key for the proclock table.
@@ -289,6 +335,8 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 		/* Could do a deadlock risk check here. */
 	}
 
+	resLockAcquireStatus = RQA_PROCLOCK_READY;
+
 	/*
 	 * lock->nRequested and lock->requested[] count the total number of
 	 * requests, whether granted or waiting, so increment those immediately.
@@ -314,6 +362,7 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 		lock->nRequested--;
 		lock->requested[lockmode]--;
 		LWLockReleaseAll();
+		resLockAcquireStatus = RQA_NOT_STARTED_OR_DONE;
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -324,6 +373,8 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 	 */
 	if (incrementSet->increments[RES_COST_LIMIT] < queue->ignorecostlimit)
 	{
+		resLockAcquireStatus = RQA_LOCK_NOT_AVAIL;
+
 		/* Decrement requested. */
 		lock->nRequested--;
 		lock->requested[lockmode]--;
@@ -342,6 +393,7 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 		LWLockRelease(ResQueueLock);
 		LWLockRelease(partitionLock);
 
+		resLockAcquireStatus = RQA_NOT_STARTED_OR_DONE;
 		/*
 		 * To avoid queue accounting problems, we will need to reset the
 		 * queueId and portalId for this portal *after* returning from here.
@@ -420,6 +472,8 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 	}
 	else if (status == STATUS_OK)
 	{
+		resLockAcquireStatus = RQA_GRANT_LOCK;
+
 		/*
 		 * The requested lock will *not* exhaust the limit for this resource
 		 * queue, so record this in the local lock hash, and grant it.
@@ -427,16 +481,21 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 		ResGrantLock(lock, proclock);
 		ResLockUpdateLimit(lock, proclock, incrementSet, true, false);
 
+		resLockAcquireStatus = RQA_LOCK_LIMIT_UPDATED;
+
 		LWLockRelease(ResQueueLock);
 
 		/* Note the start time for queue statistics. */
 		pgstat_record_start_queue_exec(incrementSet->portalId,
 									   locktag->locktag_field1);
+
+		resLockAcquireStatus = RQA_STATISTICS_UPDATED;
 	}
 	else
 	{
 		Assert(status == STATUS_FOUND);
 
+		resLockAcquireStatus = RQA_WAIT_ON_LOCK;
 		/*
 		 * The requested lock will exhaust the limit for this resource queue,
 		 * so must wait.
@@ -491,10 +550,13 @@ ResLockAcquire(LOCKTAG *locktag, ResPortalIncrement *incrementSet)
 									 locktag->locktag_field1);
 		pgstat_record_start_queue_exec(incrementSet->portalId,
 									   locktag->locktag_field1);
+		resLockAcquireStatus = RQA_STATISTICS_UPDATED;
 	}
 
 	/* Release the	partition lock. */
 	LWLockRelease(partitionLock);
+
+	resLockAcquireStatus = RQA_NOT_STARTED_OR_DONE;
 
 	return LOCKACQUIRE_OK;
 }
@@ -524,6 +586,30 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 	/* Check the lock method bits. */
 	Assert(locktag->locktag_lockmethodid == RESOURCE_LOCKMETHOD);
 
+	/* Check whether previous ResLockAcquire() was interrupted. */
+	if (resLockAcquireStatus != RQA_NOT_STARTED_OR_DONE)
+	{
+		elog(LOG,
+			 "Resource queue %d: previous ResLockAcquire() interrupted, "
+			 " status = %d",
+			 locktag->locktag_field1,
+			 resLockAcquireStatus);
+	}
+
+	/*
+	 * ResLockRelease() might re-enter.
+	 * Check whether previous ResLockRelease() was interrupted.
+	 */
+	if (resLockReleaseStatus != RQR_NOT_STARTED_OR_DONE)
+	{
+		elog(LOG,
+			 "Resource queue %d: previous ResLockRelease() interrupted, "
+			 " status = %d",
+			 locktag->locktag_field1,
+			 resLockReleaseStatus);
+	}
+	resLockReleaseStatus = RQR_STARTED;
+
 	/* Provide a resource owner. */
 	owner = CurrentResourceOwner;
 
@@ -545,13 +631,17 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		!locallock->proclock)
 	{
 		elog(LOG, "Resource queue %d: no lock to release", locktag->locktag_field1);
+
+		DumpResQueueLockInfo(locallock, true);
 		if (locallock)
 		{
 			RemoveLocalLock(locallock);
 		}
 
+		resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
 		return false;
 	}
+	resLockReleaseStatus = RQR_LOCKS_EXISTING_CHECKED;
 
 	hashcode = locallock->hashcode;
 
@@ -576,11 +666,16 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		memcmp(&locallock->tag.lock, &lock->tag, sizeof(lock->tag)) != 0)
 	{
 		LWLockRelease(partitionLock);
-		elog(DEBUG1, "Resource queue %d: lock already gone", locktag->locktag_field1);
+		elog(LOG,
+			 "Resource queue %d: lock already gone",
+			 locktag->locktag_field1);
+		DumpResQueueLockInfo(locallock, true);
 		RemoveLocalLock(locallock);
 
+		resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
 		return false;
 	}
+	resLockReleaseStatus = RQR_SHARED_TABLED_CHECKED;
 
 	LWLockAcquire(ResQueueLock, LW_EXCLUSIVE);
 
@@ -597,8 +692,10 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		LWLockRelease(ResQueueLock);
 		LWLockRelease(partitionLock);
 
+		resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
 		return false;
 	}
+	resLockReleaseStatus = RQR_LOCK_HOLD_CHECKED;
 
 	/*
 	 * Find the increment for this portal and process.
@@ -610,7 +707,11 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 	incrementSet = ResIncrementFind(&portalTag);
 	if (!incrementSet)
 	{
-		elog(DEBUG1, "Resource queue %d: increment not found on unlock", locktag->locktag_field1);
+		elog(LOG,
+			 "Resource queue %d: increment not found on unlock",
+			 locktag->locktag_field1);
+		DumpResQueueLockInfo(locallock, false);
+
 		/*
 		 * Clean up the locallock. Since a single locallock can represent
 		 * multiple locked portals in the same backend, we can only remove it if
@@ -624,14 +725,18 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		ResCleanUpLock(lock, proclock, hashcode, true);
 		LWLockRelease(ResQueueLock);
 		LWLockRelease(partitionLock);
+		resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
 		return false;
 	}
+	resLockReleaseStatus = RQR_INCREMENT_FOUND;
 
 	/*
 	 * Un-grant the lock.
 	 */
 	ResUnGrantLock(lock, proclock);
+	resLockReleaseStatus = RQR_LOCK_UNGRANTED;
 	ResLockUpdateLimit(lock, proclock, incrementSet, false, false);
+	resLockReleaseStatus = RQR_LOCK_LIMIT_UPDATED;
 
 	/*
 	 * Perform clean-up, waking up any waiters!
@@ -644,6 +749,7 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		RemoveLocalLock(locallock);
 
 	ResCleanUpLock(lock, proclock, hashcode, true);
+	resLockReleaseStatus = RQR_LOCK_CLEANED;
 
 	/*
 	 * Clean up the increment set.
@@ -664,6 +770,7 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 	pgstat_count_queue_exec(resPortalId, locktag->locktag_field1);
 	pgstat_record_end_queue_exec(resPortalId, locktag->locktag_field1);
 
+	resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
 	return true;
 }
 
@@ -2267,4 +2374,205 @@ static uint64 ResourceQueueGetSuperuserQueryMemoryLimit(void)
 {
 	Assert(superuser());
 	return (uint64) statement_mem * 1024L;
+}
+
+/**
+ * Dump locallock, and relevant lock/proclock (if they exist)
+ * acquireRqLock indicates whethere we need to acquire resource
+ * queue lock
+ */
+void DumpResQueueLockInfo(LOCALLOCK *locallock, bool acquireRqLock)
+{
+	if(locallock)
+	{
+		LOCALLOCKTAG localtag = locallock->tag;
+		elog(LOG,
+			 "\n\tDumping locallock: \n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %p\n"
+			 "\t%-40s %p\n"
+			 "\t%-40s %ld\n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %d\n"
+			 "\t%-40s %ld\n"
+			 "\t%-40s %s\n"
+			 "\t%-40s %s\n"
+			 "\t%-40s %s\n",
+			 "tag.lock.locktag_field1:",
+			 localtag.lock.locktag_field1,
+			 "tag.lock.locktag_field2:",
+			 localtag.lock.locktag_field2,
+			 "tag.lock.locktag_field3:",
+			 localtag.lock.locktag_field3,
+			 "tag.lock.locktag_field4:",
+			 localtag.lock.locktag_field4,
+			 "tag.mode:",
+			 localtag.mode,
+			 "lock:",
+			 locallock->lock,
+			 "proclock:",
+			 locallock->proclock,
+			 "nLocks:",
+			 locallock->nLocks,
+			 "numLockOwners:",
+			 locallock->numLockOwners,
+			 "maxLockOwners:",
+			 locallock->maxLockOwners,
+			 "lockOwners.nLocks:",
+			 locallock->lockOwners->nLocks,
+			 "holdsStrongLockCount:",
+			 locallock->holdsStrongLockCount ? "true" : "false",
+			 "lockCleared:",
+			 locallock->lockCleared ? "true" : "false",
+			 "istemptable:",
+			 locallock->istemptable ? "true" : "false");
+		if(locallock->lock)
+		{
+			LOCK *lock = locallock->lock;
+			LOCKTAG locktag = lock->tag;
+			elog(LOG,
+				 "\n\tDumping lock: \n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d,%d,%d,%d,%d,%d,%d,%d,%d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d,%d,%d,%d,%d,%d,%d,%d,%d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %s\n",
+				 "tag.locktag_field1:",
+				 locktag.locktag_field1,
+				 "tag.locktag_field2:",
+				 locktag.locktag_field3,
+				 "tag.locktag_field3:",
+				 locktag.locktag_field3,
+				 "tag.locktag_field4:",
+				 locktag.locktag_field4,
+				 "tag.locktag_type:",
+				 locktag.locktag_type,
+				 "tag.locktag_lockmethodid:",
+				 locktag.locktag_lockmethodid,
+				 "grantMask:",
+				 lock->grantMask,
+				 "waitMask:",
+				 lock->waitMask,
+				 "procLocks.prev:",
+				 lock->procLocks.prev,
+				 "procLocks.next:",
+				 lock->procLocks.next,
+				 "waitProcs.links.prev:",
+				 lock->waitProcs.links.prev,
+				 "waitProcs.links.next:",
+				 lock->waitProcs.links.next,
+				 "waitProcs.size:",
+				 lock->waitProcs.size,
+				 "requested:",
+				 lock->requested[1],
+				 lock->requested[2],
+				 lock->requested[3],
+				 lock->requested[4],
+				 lock->requested[5],
+				 lock->requested[6],
+				 lock->requested[7],
+				 lock->requested[8],
+				 lock->requested[9],
+				 "nRequested:",
+				 lock->nRequested,
+				 "granted:",
+				 lock->granted[1],
+				 lock->granted[2],
+				 lock->granted[3],
+				 lock->granted[4],
+				 lock->granted[5],
+				 lock->granted[6],
+				 lock->granted[7],
+				 lock->granted[8],
+				 lock->granted[9],
+				 "nGranted:",
+				 lock->nGranted,
+				 "holdTillEndXact:",
+				 lock->holdTillEndXact ? "true" : "false"
+				 );
+		}
+		if(locallock->proclock)
+		{
+			PROCLOCK *proclock = locallock->proclock;
+			elog(LOG,
+				 "\n\tDumping lock: \n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %d\n"
+				 "\t%-40s %p\n"
+				 "\t%-40s %p\n",
+				 "tag.myLock:",
+				 proclock->tag.myLock,
+				 "tag.myProc:",
+				 proclock->tag.myProc,
+				 "holdMask:",
+				 proclock->holdMask,
+				 "releaseMask:",
+				 proclock->releaseMask,
+				 "lockLink.prev:",
+				 proclock->lockLink.prev,
+				 "lockLink.next:",
+				 proclock->lockLink.next,
+				 "procLink.prev:",
+				 proclock->procLink.prev,
+				 "procLink.next:",
+				 proclock->procLink.next,
+				 "nLocks:",
+				 proclock->nLocks,
+				 "portalLinks.prev:",
+				 proclock->portalLinks.prev,
+				 "portalLinks.next:",
+				 proclock->portalLinks.next);
+		}
+	}
+
+	/* Dump resource queue limit */
+	if(locallock && locallock->lock)
+	{
+		LOCK	 *lock = locallock->lock;
+		ResQueue  queue;
+
+		if(acquireRqLock)
+		{
+			LWLockAcquire(ResQueueLock, LW_EXCLUSIVE);
+		}
+		/* Get the queue for this lock. */
+		queue = GetResQueueFromLock(lock);
+		if (queue != NULL)
+		{
+			ResLimit limits  = queue->limits;
+			Assert(limits[0].type == RES_COUNT_LIMIT);
+			elog(LOG,
+				 "Resource queue id: %d, count limit: %f\n",
+				 queue->queueid,
+			limits[0].current_value);
+		}
+		if(acquireRqLock)
+		{
+			LWLockRelease(ResQueueLock);
+		}
+	}
 }
