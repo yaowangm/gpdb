@@ -582,6 +582,7 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 
 	ResPortalIncrement *incrementSet;
 	ResPortalTag portalTag;
+	bool resLockAcquireOrReleaseInterrupted = false;
 
 	/* Check the lock method bits. */
 	Assert(locktag->locktag_lockmethodid == RESOURCE_LOCKMETHOD);
@@ -594,6 +595,7 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 			 " status = %d",
 			 locktag->locktag_field1,
 			 resLockAcquireStatus);
+		resLockAcquireOrReleaseInterrupted = true;
 	}
 
 	/*
@@ -607,6 +609,7 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 			 " status = %d",
 			 locktag->locktag_field1,
 			 resLockReleaseStatus);
+		resLockAcquireOrReleaseInterrupted = true;
 	}
 	resLockReleaseStatus = RQR_STARTED;
 
@@ -735,7 +738,11 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 	 */
 	ResUnGrantLock(lock, proclock);
 	resLockReleaseStatus = RQR_LOCK_UNGRANTED;
-	ResLockUpdateLimit(lock, proclock, incrementSet, false, false);
+	ResLockUpdateLimit(lock,
+					   proclock,
+					   incrementSet,
+					   false,
+					   resLockAcquireOrReleaseInterrupted);
 	resLockReleaseStatus = RQR_LOCK_LIMIT_UPDATED;
 
 	/*
@@ -961,6 +968,22 @@ ResLockUpdateLimit(LOCK *lock, PROCLOCK *proclock, ResPortalIncrement *increment
 	/* Get the queue for this lock. */
 	queue = GetResQueueFromLock(lock);
 	limits = queue->limits;
+
+	/*
+	 * If inError is true, dump the rq info and stack to track
+	 * where ResLockUpdateLimit() was called.
+	 */
+	if (inError)
+	{
+		Assert(limits[0].type == RES_COUNT_LIMIT);
+		elog(LOG,
+			 "Resource queue id: %d, count limit: %f\n",
+			 queue->queueid,
+			 limits[0].current_value);
+		ereport(LOG,
+				(errmsg("ResLockUpdateLimit()"),
+				errprintstack(true)));
+	}
 
 	for (i = 0; i < NUM_RES_LIMIT_TYPES; i++)
 	{
