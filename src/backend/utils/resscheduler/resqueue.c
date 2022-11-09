@@ -130,7 +130,7 @@ static enum ResLockReleaseStatus resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
 
 static void BuildQueueStatusContext(QueueStatusContext *fctx);
 
-void DumpResQueueLockInfo(LOCALLOCK *locallock, bool acquireRqLock);
+void DumpResQueueLockInfo(LOCALLOCK *locallock);
 
 /*
  * ResLockAcquire -- acquire a resource lock.
@@ -627,6 +627,15 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		hash_search(LockMethodLocalHash, (void *) &localtag, HASH_FIND, NULL);
 
 	/*
+	 * If ResLockAcquire() or ResLockRelease() was interrupted,
+	 * dump resource queue lock info
+	 */
+	if (resLockAcquireOrReleaseInterrupted)
+	{
+		DumpResQueueLockInfo(locallock);
+	}
+
+	/*
 	 * If the lock request did not get very far, cleanup is easy.
 	 */
 	if (!locallock ||
@@ -635,7 +644,6 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 	{
 		elog(LOG, "Resource queue %d: no lock to release", locktag->locktag_field1);
 
-		DumpResQueueLockInfo(locallock, true);
 		if (locallock)
 		{
 			RemoveLocalLock(locallock);
@@ -672,7 +680,6 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		elog(LOG,
 			 "Resource queue %d: lock already gone",
 			 locktag->locktag_field1);
-		DumpResQueueLockInfo(locallock, true);
 		RemoveLocalLock(locallock);
 
 		resLockReleaseStatus = RQR_NOT_STARTED_OR_DONE;
@@ -713,7 +720,6 @@ ResLockRelease(LOCKTAG *locktag, uint32 resPortalId)
 		elog(LOG,
 			 "Resource queue %d: increment not found on unlock",
 			 locktag->locktag_field1);
-		DumpResQueueLockInfo(locallock, false);
 
 		/*
 		 * Clean up the locallock. Since a single locallock can represent
@@ -2401,10 +2407,8 @@ static uint64 ResourceQueueGetSuperuserQueryMemoryLimit(void)
 
 /**
  * Dump locallock, and relevant lock/proclock (if they exist)
- * acquireRqLock indicates whethere we need to acquire resource
- * queue lock
  */
-void DumpResQueueLockInfo(LOCALLOCK *locallock, bool acquireRqLock)
+void DumpResQueueLockInfo(LOCALLOCK *locallock)
 {
 	if(locallock)
 	{
@@ -2578,10 +2582,7 @@ void DumpResQueueLockInfo(LOCALLOCK *locallock, bool acquireRqLock)
 		LOCK	 *lock = locallock->lock;
 		ResQueue  queue;
 
-		if(acquireRqLock)
-		{
-			LWLockAcquire(ResQueueLock, LW_EXCLUSIVE);
-		}
+		LWLockAcquire(ResQueueLock, LW_EXCLUSIVE);
 		/* Get the queue for this lock. */
 		queue = GetResQueueFromLock(lock);
 		if (queue != NULL)
@@ -2593,9 +2594,6 @@ void DumpResQueueLockInfo(LOCALLOCK *locallock, bool acquireRqLock)
 				 queue->queueid,
 			limits[0].current_value);
 		}
-		if(acquireRqLock)
-		{
-			LWLockRelease(ResQueueLock);
-		}
+		LWLockRelease(ResQueueLock);
 	}
 }
