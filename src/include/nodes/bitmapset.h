@@ -48,7 +48,7 @@ struct List;
  * bitmapword for TID bitmaps, just like upastream, and eliminate
  * tbm_bitmapword?
  */
-#if false && SIZEOF_VOID_P >= 8
+#if SIZEOF_VOID_P >= 8
 
 #define BITS_PER_BITMAPWORD 64
 typedef uint64 bitmapword;		/* must be an unsigned type */
