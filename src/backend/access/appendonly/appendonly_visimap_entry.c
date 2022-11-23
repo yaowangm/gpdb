@@ -157,15 +157,29 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 */
 	visiMapEntry->bitmap = NULL;
 	newWordCount =
-		BitmapDecompress_GetBlockCount(&decompressState) / 2;
+		BitmapDecompress_GetBlockCount(&decompressState);
+	/*
+	 * Bitmap compression always uses 32 bit words, and the result of
+	 * BitmapDecompress_GetBlockCount() is always in 32 bit words. So,
+	 * if bitmapset uses 64 bit words, we can use half of the value.
+	 */
+	if (BITS_PER_BITMAPWORD == 64)
+	{
+		newWordCount /= 2;
+	}
 	if (newWordCount > 0)
 	{
 		visiMapEntry->bitmap = palloc0(offsetof(Bitmapset, words) +
 									   (newWordCount * sizeof(bitmapword)));
 		visiMapEntry->bitmap->nwords = newWordCount;
+		/*
+		 * if bitmapset uses 64 bit words, we need double newWordCount
+		 * as bitmapDataSize since bitmap compression always uses 32 bit words.
+		 */
 		BitmapDecompress_Decompress(&decompressState,
 									visiMapEntry->bitmap->words,
-									newWordCount * 2);
+									BITS_PER_BITMAPWORD == 64 ?
+										newWordCount * 2 : newWordCount);
 	}
 	else if (newWordCount != 0)
 	{
