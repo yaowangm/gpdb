@@ -453,9 +453,7 @@ AppendOnlyVisimapDelete_RebuildEntry(AppendOnlyVisimapEntry *visimapEntry, int s
 		offsetof(AppendOnlyVisimapData, data);
 
 	oldContext = MemoryContextSwitchTo(visimapEntry->memoryContext);
-	// elog(WARNING, "5 bitmap->nwords = %d", visimapEntry->bitmap->nwords);
 	AppendOnlyVisiMapEnty_ReadData(visimapEntry, dataSize);
-	// elog(WARNING, "6 bitmap->nwords = %d", visimapEntry->bitmap->nwords);
 	MemoryContextSwitchTo(oldContext);
 
 	/*
@@ -811,12 +809,10 @@ AppendOnlyVisimapDelete_WriteBackStashedEntries(AppendOnlyVisimapDelete *visiMap
 			 * valid information. After this the visimap entry is fully
 			 * rebuild.
 			 */
-			//elog(WARNING, "3 bitmap->nwords = %d", visiMap->visimapEntry.bitmap->nwords);
 			AppendOnlyVisimapDelete_RebuildEntry(&visiMap->visimapEntry,
 												 deleteData->key.segno,
 												 deleteData->key.firstRowNum,
 												 &deleteData->tupleTid);
-			//elog(WARNING, "4 bitmap->nwords = %d", visiMap->visimapEntry.bitmap->nwords);
 			AppendOnlyVisimap_Store(visiMapDelete->visiMap);
 		}
 
@@ -848,7 +844,6 @@ AppendOnlyVisimapDelete_Finish(
 	Assert(visiMap);
 
 	elogif(Debug_appendonly_print_visimap, LOG, "Write-back all dirty visimap entries");
-	//elog(WARNING, "bitmap->nwords = %d", visiMap->visimapEntry.bitmap->nwords);
 
 	/*
 	 * Write back the current change because it is be definition the newest.
@@ -875,7 +870,6 @@ AppendOnlyVisimapDelete_Finish(
 		}
 	}
 
-	//elog(WARNING, " 2 bitmap->nwords = %d", visiMap->visimapEntry.bitmap->nwords);
 	AppendOnlyVisimapDelete_WriteBackStashedEntries(visiMapDelete);
 
 	hash_destroy(visiMapDelete->dirtyEntryCache);

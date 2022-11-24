@@ -797,7 +797,6 @@ bms_resize(Bitmapset *a, int wc)
 		result->nwords = wc;
 	}
 
-	//elog(WARNING, "bms->nwords = %d", result->nwords);
 	return result;
 }
 
