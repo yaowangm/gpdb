@@ -167,6 +167,8 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	{
 		newWordCount /= 2;
 	}
+	Assert(newWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+
 	if (newWordCount > 0)
 	{
 		visiMapEntry->bitmap = palloc0(offsetof(Bitmapset, words) +
@@ -281,8 +283,8 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	/* bitmap size, in bytes */
 	int	bitmapSize = 0;
 	int	compressedBitmapSize = 0;
-	/* bitmap data size, in uint32-words */
-	int	bitmapDataSize = 0;
+	/* bitmap word count, in uint32-words */
+	int	bitmapWordCount = 0;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
@@ -306,19 +308,19 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 
 	if (visiMapEntry->bitmap)
 	{
-		bitmapDataSize = visiMapEntry->bitmap->nwords;
-		/*
-	 	 * bitmapDataSize is always in uint32-words. So, if bitmapset uses
-		 * 64 bit words, double the value.
-		 */
-		if (BITS_PER_BITMAPWORD == 64)
-		{
-			bitmapDataSize *= 2;
-		}
+		bitmapWordCount = visiMapEntry->bitmap->nwords;
 	}
+	Assert(bitmapWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+
+	/*
+	 * bitmapDataSize required by Bitmap_Compress() is always in
+	 * uint32-words. So, if bitmapset uses 64 bit words, double
+	 * the value of bitmapWordCount.
+	 */
 	compressedBitmapSize = Bitmap_Compress(BITMAP_COMPRESSION_TYPE_DEFAULT,
 										   (visiMapEntry->bitmap ? visiMapEntry->bitmap->words : NULL),
-										   bitmapDataSize,
+										   BITS_PER_BITMAPWORD == 64 ?
+											bitmapWordCount * 2 : bitmapWordCount,
 										   visiMapEntry->data->data,
 										   bitmapSize);
 	Assert(compressedBitmapSize >= BITMAP_COMPRESSION_HEADER_SIZE);
@@ -519,6 +521,9 @@ AppendOnlyVisimapEntry_IsVisible(
 /*
  * The minimal size (in uint32's elements) the entry array needs to have to
  * cover the given offset
+ * Note that on 64 bit env, AppendOnlyVisimapEntry->bitmap uses 64 bits, so
+ * the caller of AppendOnlyVisimapEntry_GetMinimalSizeToCover() need to
+ * half the returned value.
  */
 static uint32
 AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
