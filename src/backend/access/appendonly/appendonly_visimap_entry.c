@@ -175,7 +175,7 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 									   (newWordCount * sizeof(bitmapword)));
 		visiMapEntry->bitmap->nwords = newWordCount;
 		/*
-		 * if bitmapset uses 64 bit words, we need double newWordCount
+		 * If bitmapset uses 64 bit words, we need double newWordCount
 		 * as bitmapDataSize since bitmap compression always uses 32 bit words.
 		 */
 		BitmapDecompress_Decompress(&decompressState,
@@ -294,9 +294,10 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	bitmapSize += BITMAP_COMPRESSION_HEADER_SIZE;
 
 	Assert(visiMapEntry->data);
-	if(APPENDONLY_VISIMAP_DATA_BUFFER_SIZE < bitmapSize)
+	if (bitmapSize > APPENDONLY_VISIMAP_DATA_BUFFER_SIZE)
 	{
 		elog(PANIC,
+			 "incorrect bitmapSize: "
 			 "APPENDONLY_VISIMAP_DATA_BUFFER_SIZE = %d, "
 			 "bitmapSize = %d, "
 			 "visiMapEntry->bitmap->nwords = %d",
@@ -542,9 +543,12 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	minSize |= minSize >> 8;
 	minSize |= minSize >> 16;
 	minSize++;
-	if(minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT)
+	if (minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT)
 	{
-		elog(PANIC, "offset=%d, minSize=%d", offset, minSize);
+		elog(PANIC,
+			 "incorrect minSize: offset=%d, minSize=%d",
+			 offset,
+			 minSize);
 	}
 
 	return minSize;
