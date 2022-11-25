@@ -248,10 +248,10 @@ extern int	gp_snapshotadd_timeout; /* GUC var - timeout specifier for snapshot-c
 extern int	gp_fts_probe_retries; /* GUC var - specifies probe number of retries for FTS */
 extern int	gp_fts_probe_timeout; /* GUC var - specifies probe timeout for FTS */
 extern int	gp_fts_probe_interval; /* GUC var - specifies polling interval for FTS */
-extern int gp_fts_mark_mirror_down_grace_period;
+extern int	gp_fts_mark_mirror_down_grace_period;
 extern int	gp_fts_replication_attempt_count; /* GUC var - specifies replication max attempt count for FTS */
-extern int  gp_dtx_recovery_interval;
-extern int  gp_dtx_recovery_prepared_period;
+extern int	gp_dtx_recovery_interval;
+extern int	gp_dtx_recovery_prepared_period;
 
 extern int gp_gang_creation_retry_count; /* How many retries ? */
 extern int gp_gang_creation_retry_timer; /* How long between retries */
@@ -296,6 +296,33 @@ typedef enum GpVars_Interconnect_Type
 } GpVars_Interconnect_Type;
 
 extern int Gp_interconnect_type;
+
+/*
+ * We support different strategies for address binding for sockets used for
+ * motion communication over the interconnect.
+ *
+ * One approach is to use an unicast address, specifically the segment's
+ * gp_segment_configuration.address field to perform the address binding. This
+ * has the benefits of reducing port usage on a segment host and ensures that
+ * the NIC backed by the address field is the only one used for communication
+ * (and not an externally facing slower NIC, like the ones that typically back
+ * the gp_segment_configuration.hostname field)
+ *
+ * In some cases, inter-segment communication using the unicast address
+ * mentioned above, may not be possible. One such example is if the source
+ * segment's address field and the destination segment's address field are on
+ * different subnets and/or existing routing rules don't allow for such
+ * communication. In these cases, using a wildcard address for address binding
+ * is the only available fallback, enabling the use of any network interface
+ * compliant with routing rules.
+ */
+typedef enum GpVars_Interconnect_Address_Type
+{
+	INTERCONNECT_ADDRESS_TYPE_UNICAST = 0,
+	INTERCONNECT_ADDRESS_TYPE_WILDCARD
+} GpVars_Interconnect_Address_Type;
+
+extern int Gp_interconnect_address_type;
 
 extern char *gp_interconnect_proxy_addresses;
 
@@ -589,16 +616,6 @@ extern int explain_memory_verbosity;
  * the tactic is used whenever possible.
  */
 extern bool gp_enable_sort_limit;
-
-/* May Greenplum discard duplicate rows in sort if it is is wrapped by a
- * DISTINCT clause (unique aggregation operator)?
- *
- * The code does not currently use planner estimates for this.  If enabled,
- * the tactic is used whenever possible.
- *
- * GPDB_12_MERGE_FIXME: Resurrect this
- */
-extern bool gp_enable_sort_distinct;
 
 extern bool trace_sort;
 

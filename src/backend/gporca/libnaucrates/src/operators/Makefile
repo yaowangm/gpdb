@@ -58,6 +58,9 @@ OBJS        = CDXLColDescr.o \
               CDXLPhysicalCTEConsumer.o \
               CDXLPhysicalCTEProducer.o \
               CDXLPhysicalDML.o \
+              CDXLPhysicalDynamicBitmapTableScan.o \
+              CDXLPhysicalDynamicIndexScan.o \
+              CDXLPhysicalDynamicTableScan.o \
               CDXLPhysicalExternalScan.o \
               CDXLPhysicalGatherMotion.o \
               CDXLPhysicalHashJoin.o \
@@ -75,7 +78,6 @@ OBJS        = CDXLColDescr.o \
               CDXLPhysicalRedistributeMotion.o \
               CDXLPhysicalResult.o \
               CDXLPhysicalRoutedDistributeMotion.o \
-              CDXLPhysicalRowTrigger.o \
               CDXLPhysicalSequence.o \
               CDXLPhysicalSort.o \
               CDXLPhysicalSplit.o \

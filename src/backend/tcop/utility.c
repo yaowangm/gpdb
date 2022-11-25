@@ -22,7 +22,9 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "catalog/catalog.h"
+#include "catalog/gp_partition_template.h"
 #include "catalog/namespace.h"
+#include "catalog/partition.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/toasting.h"
 #include "commands/alter.h"
@@ -79,7 +81,6 @@
 #include "cdb/cdbdisp_query.h"
 #include "cdb/cdbendpoint.h"
 #include "cdb/cdbvars.h"
-
 
 /* Hook for plugins to get control in ProcessUtility() */
 ProcessUtility_hook_type ProcessUtility_hook = NULL;
@@ -1191,8 +1192,6 @@ ProcessUtilitySlow(ParseState *pstate,
 							char		relKind = RELKIND_RELATION;
 							Datum		toast_options;
 							static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
-							List *options = NIL;
-							char *accessmethod = NULL;
 
 							/*
 							 * If this T_CreateStmt was dispatched and we're a QE
@@ -1206,26 +1205,6 @@ ProcessUtilitySlow(ParseState *pstate,
 							}
 							else
 								cstmt->relKind = relKind;
-
-							/*
-							 * Upstream postgres does not support user specified
-							 * RelOptions and TableAM for a parent partitioned
-							 * table. The legacy Greenplum behavior is to have
-							 * the RelOptions and TableAM specified for the
-							 * parent table to be inherited by the child
-							 * partitions. Hence we need to remove these from
-							 * the parent table's CreateStmt and store them to
-							 * pass down to create the child partition's
-							 * CreateStmt. This is only done when creating
-							 * partitions with Greenplum legacy syntax.
-							 */
-							if (cstmt->partspec && cstmt->partspec->gpPartDef)
-							{
-								options = cstmt->options;
-								cstmt->options = NIL;
-								accessmethod = cstmt->accessMethod;
-								cstmt->accessMethod = NULL;
-							}
 
 							/*
 							 * GPDB: Don't dispatch it yet, as we haven't
@@ -1242,12 +1221,23 @@ ProcessUtilitySlow(ParseState *pstate,
 							if (cstmt->partspec && cstmt->partspec->gpPartDef)
 							{
 								List *parts;
+								GpPartitionDefinition *gpPartDef = cstmt->partspec->gpPartDef;
+								Oid parentrelid = address.objectId;
+								List *ancestors = get_partition_ancestors(parentrelid);
 
-								parts = generatePartitions(address.objectId,
-														   cstmt->partspec->gpPartDef,
+								if (!gpPartDef->fromCatalog)
+								{
+									gpPartDef = transformGpPartitionDefinition(parentrelid, queryString, gpPartDef);
+									if (gpPartDef->isTemplate)
+										StoreGpPartitionTemplate(ancestors ? llast_oid(ancestors) : parentrelid,
+																 list_length(ancestors), gpPartDef);
+								}
+
+								parts = generatePartitions(parentrelid,
+														   gpPartDef,
 														   cstmt->partspec->subPartSpec,
-														   queryString, options,
-														   accessmethod,
+														   queryString, cstmt->options,
+														   cstmt->accessMethod,
 														   cstmt->attr_encodings, false);
 								more_stmts = list_concat(more_stmts, parts);
 							}

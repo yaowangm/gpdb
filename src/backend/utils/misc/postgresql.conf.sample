@@ -374,7 +374,6 @@ max_prepared_transactions = 250		# can be 0 or more
 #gp_selectivity_damping_for_joins = off
 
 #gp_enable_sort_limit = on
-#gp_enable_sort_distinct = on
 
 # - Planner Cost Constants -
 
@@ -787,6 +786,7 @@ gp_vmem_protect_limit = 8192  #Virtual memory limit (in MB).
 					# a directory, e.g., 'conf.d'
 #include_if_exists = ''			# include file only if it exists
 #include = 'special.conf'				# include file
+include = 'internal.auto.conf'		# GP_INTERNAL_AUTO_CONF_FILE_NAME which sets the gp_dbid
 
 
 #------------------------------------------------------------------------------

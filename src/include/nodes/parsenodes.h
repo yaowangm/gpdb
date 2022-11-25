@@ -226,6 +226,8 @@ typedef struct Query
 	 */
 	int			stmt_location;	/* start location, or -1 if unknown */
 	int			stmt_len;		/* length in bytes; 0 means "rest of string" */
+
+	bool		expandMatViews; /* force expansion of materialized views during rewrite to treat as views */
 } Query;
 
 /****************************************************************************
@@ -1959,7 +1961,9 @@ typedef enum AlterTableType
 	AT_SetLogged,				/* SET LOGGED */
 	AT_SetUnLogged,				/* SET UNLOGGED */
 	AT_DropOids,				/* SET WITHOUT OIDS */
+	AT_SetAccessMethod,			/* SET ACCESS METHOD */
 	AT_SetTableSpace,			/* SET TABLESPACE */
+	AT_SetColumnEncoding,        /* SET ENCODING (...)*/
 	AT_SetRelOptions,			/* SET (...) -- AM specific parameters */
 	AT_ResetRelOptions,			/* RESET (...) -- AM specific parameters */
 	AT_ReplaceRelOptions,		/* replace reloption list in its entirety */
@@ -2330,6 +2334,7 @@ typedef struct CreateStmt
 	char	   *tablespacename; /* table space to use, or NULL */
 	char	   *accessMethod;	/* table access method */
 	bool		if_not_exists;	/* just do nothing if it already exists? */
+	bool 		gp_style_alter_part; /* is this due to a GP-style ALTER on partition tables? */
 
 	DistributedBy *distributedBy;   /* what columns we distribute the data by */
 	Node       *partitionBy;     /* what columns we partition the data by */

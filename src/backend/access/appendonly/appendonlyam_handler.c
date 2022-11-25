@@ -24,6 +24,7 @@
 #include "access/tuptoaster.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "catalog/gp_fastsequence.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/pg_am.h"
@@ -47,46 +48,35 @@ static void reset_state_cb(void *arg);
 
 static const TableAmRoutine ao_row_methods;
 
+/*
+ * Per-relation backend-local DML state for DML or DML-like operations.
+ */
 typedef struct AppendOnlyDMLState
 {
 	Oid relationOid;
 	AppendOnlyInsertDesc	insertDesc;
 	AppendOnlyDeleteDesc	deleteDesc;
+	AppendOnlyUniqueCheckDesc uniqueCheckDesc;
 } AppendOnlyDMLState;
 
 
 /*
- * GPDB_12_MERGE_FIXME: This is a temporary state of things. A locally stored
- * state is needed currently because there is no viable place to store this
- * information outside of the table access method. Ideally the caller should be
- * responsible for initializing a state and passing it over using the table
- * access method api.
- *
- * Until this is in place, the local state is not to be accessed directly but
- * only via the *_dml_state functions.
- * It contains:
- *		a quick look up member for the common case
+ * A repository for per-relation backend-local DML states. Contains:
+ *		a quick look up member for the common case (only 1 relation)
  *		a hash table which keeps per relation information
  *		a memory context that should be long lived enough and is
  *			responsible for reseting the state via its reset cb
  */
-static struct AppendOnlyLocal
+typedef struct AppendOnlyDMLStates
 {
 	AppendOnlyDMLState	   *last_used_state;
-	HTAB				   *dmlDescriptorTab;
+	HTAB				   *state_table;
 
 	MemoryContext			stateCxt;
 	MemoryContextCallback	cb;
-} appendOnlyLocal	  = {
-	.last_used_state  = NULL,
-	.dmlDescriptorTab = NULL,
+} AppendOnlyDMLStates;
 
-	.stateCxt		  = NULL,
-	.cb				  = {
-		.func	= reset_state_cb,
-		.arg	= NULL
-	},
-};
+static AppendOnlyDMLStates appendOnlyDMLStates;
 
 /* ------------------------------------------------------------------------
  * DML state related functions
@@ -94,40 +84,39 @@ static struct AppendOnlyLocal
  */
 
 /*
+ * Initialize the backend local AppendOnlyDMLStates object for this backend for
+ * the current DML or DML-like command (if not already initialized).
+ *
  * This function should be called with a current memory context whose life
  * span is enough to last until the end of this command execution.
  */
 static void
-init_dml_local_state(void)
+init_appendonly_dml_states()
 {
 	HASHCTL hash_ctl;
 
-	if (!appendOnlyLocal.dmlDescriptorTab)
+	if (!appendOnlyDMLStates.state_table)
 	{
-		Assert(appendOnlyLocal.stateCxt == NULL);
-		appendOnlyLocal.stateCxt = AllocSetContextCreate(
+		Assert(appendOnlyDMLStates.stateCxt == NULL);
+		appendOnlyDMLStates.stateCxt = AllocSetContextCreate(
 												CurrentMemoryContext,
 												"AppendOnly DML State Context",
 												ALLOCSET_SMALL_SIZES);
-		MemoryContextRegisterResetCallback(
-								appendOnlyLocal.stateCxt,
-							   &appendOnlyLocal.cb);
+
+		appendOnlyDMLStates.cb.func = reset_state_cb;
+		appendOnlyDMLStates.cb.arg = NULL;
+		MemoryContextRegisterResetCallback(appendOnlyDMLStates.stateCxt,
+										   &appendOnlyDMLStates.cb);
 
 		memset(&hash_ctl, 0, sizeof(hash_ctl));
 		hash_ctl.keysize = sizeof(Oid);
 		hash_ctl.entrysize = sizeof(AppendOnlyDMLState);
-		hash_ctl.hcxt = appendOnlyLocal.stateCxt;
-		appendOnlyLocal.dmlDescriptorTab =
+		hash_ctl.hcxt = appendOnlyDMLStates.stateCxt;
+		appendOnlyDMLStates.state_table =
 			hash_create("AppendOnly DML state", 128, &hash_ctl,
 						HASH_CONTEXT | HASH_ELEM | HASH_BLOBS);
 	}
 }
-
-
-/*
- * There are disctinct *_dm_state functions in order to document a bit better
- * the intention behind each one of those and keep them as thin as possible.
- */
 
 /*
  * Create and insert a state entry for a relation. The actual descriptors will
@@ -135,27 +124,26 @@ init_dml_local_state(void)
  *
  * Should be called exactly once per relation.
  */
-static inline AppendOnlyDMLState *
-enter_dml_state(const Oid relationOid)
+static inline void
+init_dml_state(const Oid relationOid)
 {
 	AppendOnlyDMLState *state;
 	bool				found;
 
-	Assert(appendOnlyLocal.dmlDescriptorTab);
+	Assert(appendOnlyDMLStates.state_table);
 
-	state = (AppendOnlyDMLState *) hash_search(
-										appendOnlyLocal.dmlDescriptorTab,
-									   &relationOid,
-										HASH_ENTER,
-									   &found);
+	state = (AppendOnlyDMLState *) hash_search(appendOnlyDMLStates.state_table,
+											   &relationOid,
+											   HASH_ENTER,
+											   &found);
 
 	Assert(!found);
 
 	state->insertDesc = NULL;
 	state->deleteDesc = NULL;
+	state->uniqueCheckDesc = NULL;
 
-	appendOnlyLocal.last_used_state = state;
-	return state;
+	appendOnlyDMLStates.last_used_state = state;
 }
 
 /*
@@ -166,21 +154,20 @@ static inline AppendOnlyDMLState *
 find_dml_state(const Oid relationOid)
 {
 	AppendOnlyDMLState *state;
-	Assert(appendOnlyLocal.dmlDescriptorTab);
+	Assert(appendOnlyDMLStates.state_table);
 
-	if (appendOnlyLocal.last_used_state &&
-			appendOnlyLocal.last_used_state->relationOid == relationOid)
-		return appendOnlyLocal.last_used_state;
+	if (appendOnlyDMLStates.last_used_state &&
+			appendOnlyDMLStates.last_used_state->relationOid == relationOid)
+		return appendOnlyDMLStates.last_used_state;
 
-	state = (AppendOnlyDMLState *) hash_search(
-										appendOnlyLocal.dmlDescriptorTab,
-									   &relationOid,
-										HASH_FIND,
-										NULL);
+	state = (AppendOnlyDMLState *) hash_search(appendOnlyDMLStates.state_table,
+											   &relationOid,
+											   HASH_FIND,
+											   NULL);
 
 	Assert(state);
 
-	appendOnlyLocal.last_used_state = state;
+	appendOnlyDMLStates.last_used_state = state;
 	return state;
 }
 
@@ -190,49 +177,62 @@ find_dml_state(const Oid relationOid)
  *
  * Should be called exactly once per relation.
  */
-static inline AppendOnlyDMLState *
+static inline void
 remove_dml_state(const Oid relationOid)
 {
 	AppendOnlyDMLState *state;
-	Assert(appendOnlyLocal.dmlDescriptorTab);
+	Assert(appendOnlyDMLStates.state_table);
 
-	state = (AppendOnlyDMLState *) hash_search(
-										appendOnlyLocal.dmlDescriptorTab,
-									   &relationOid,
-										HASH_REMOVE,
-										NULL);
+	state = (AppendOnlyDMLState *) hash_search(appendOnlyDMLStates.state_table,
+											   &relationOid,
+											   HASH_REMOVE,
+											   NULL);
 
 	Assert(state);
 
-	if (appendOnlyLocal.last_used_state &&
-			appendOnlyLocal.last_used_state->relationOid == relationOid)
-		appendOnlyLocal.last_used_state = NULL;
+	if (appendOnlyDMLStates.last_used_state &&
+			appendOnlyDMLStates.last_used_state->relationOid == relationOid)
+		appendOnlyDMLStates.last_used_state = NULL;
 
-	return state;
+	return;
 }
 
 /*
- * Although the operation param is superfluous at the momment, the signature of
- * the function is such for balance between the init and finish.
- *
- * This function should be called exactly once per relation.
+ * Provides an opportunity to create backend-local state to be consulted during
+ * the course of the current DML or DML-like command, for the given relation.
  */
 void
-appendonly_dml_init(Relation relation, CmdType operation)
+appendonly_dml_init(Relation relation)
 {
-	init_dml_local_state();
-	(void) enter_dml_state(RelationGetRelid(relation));
+	/*
+	 * Initialize the repository of per-relation states, if not done already for
+	 * the current DML or DML-like command.
+	 */
+	init_appendonly_dml_states();
+	/* initialize the per-relation state */
+	init_dml_state(RelationGetRelid(relation));
 }
 
 /*
- * This function should be called exactly once per relation.
+ * Provides an opportunity to clean up backend-local state set up for the
+ * current DML or DML-like command, for the given relation.
  */
 void
-appendonly_dml_finish(Relation relation, CmdType operation)
+appendonly_dml_finish(Relation relation)
 {
 	AppendOnlyDMLState *state;
+	bool				had_delete_desc = false;
 
-	state = remove_dml_state(RelationGetRelid(relation));
+	Oid relationOid = RelationGetRelid(relation);
+
+	Assert(appendOnlyDMLStates.state_table);
+
+	state = (AppendOnlyDMLState *)hash_search(appendOnlyDMLStates.state_table,
+											  &relationOid,
+											  HASH_FIND,
+											  NULL);
+
+	Assert(state);
 
 	if (state->deleteDesc)
 	{
@@ -246,6 +246,8 @@ appendonly_dml_finish(Relation relation, CmdType operation)
 		 */
 		if (!state->insertDesc)
 			AORelIncrementModCount(relation);
+
+		had_delete_desc = true;
 	}
 
 	if (state->insertDesc)
@@ -254,6 +256,31 @@ appendonly_dml_finish(Relation relation, CmdType operation)
 		appendonly_insert_finish(state->insertDesc);
 		state->insertDesc = NULL;
 	}
+
+	if (state->uniqueCheckDesc)
+	{
+		/* clean up the block directory */
+		AppendOnlyBlockDirectory_End_forUniqueChecks(state->uniqueCheckDesc->blockDirectory);
+		pfree(state->uniqueCheckDesc->blockDirectory);
+		state->uniqueCheckDesc->blockDirectory = NULL;
+
+		/*
+		 * If this fetch is a part of an update, then we have been reusing the
+		 * visimap used by the delete half of the update, which would have
+		 * already been cleaned up above. Clean up otherwise.
+		 */
+		if (!had_delete_desc)
+		{
+			AppendOnlyVisimap_Finish_forUniquenessChecks(state->uniqueCheckDesc->visimap);
+			pfree(state->uniqueCheckDesc->visimap);
+		}
+		state->uniqueCheckDesc->visimap = NULL;
+
+		pfree(state->uniqueCheckDesc);
+		state->uniqueCheckDesc = NULL;
+	}
+
+	remove_dml_state(relationOid);
 }
 
 /*
@@ -266,16 +293,18 @@ appendonly_dml_finish(Relation relation, CmdType operation)
 static void
 reset_state_cb(void *arg)
 {
-	appendOnlyLocal.dmlDescriptorTab = NULL;
-	appendOnlyLocal.last_used_state = NULL;
-	appendOnlyLocal.stateCxt = NULL;
+	appendOnlyDMLStates.state_table = NULL;
+	appendOnlyDMLStates.last_used_state = NULL;
+	appendOnlyDMLStates.stateCxt = NULL;
 }
 
 /*
- * Retrieve the insertDescriptor for a relation. Initialize it if needed.
+ * Retrieve the insertDescriptor for a relation. Initialize it if its absent.
+ * 'num_rows': Number of rows to be inserted. (NUM_FAST_SEQUENCES if we don't
+ * know it beforehand). This arg is not used if the descriptor already exists.
  */
 static AppendOnlyInsertDesc
-get_insert_descriptor(const Relation relation)
+get_or_create_ao_insert_descriptor(const Relation relation, int64 num_rows)
 {
 	AppendOnlyDMLState *state;
 
@@ -284,10 +313,29 @@ get_insert_descriptor(const Relation relation)
 	if (state->insertDesc == NULL)
 	{
 		MemoryContext oldcxt;
+		AppendOnlyInsertDesc insertDesc;
 
-		oldcxt = MemoryContextSwitchTo(appendOnlyLocal.stateCxt);
-		state->insertDesc = appendonly_insert_init(relation,
-												   ChooseSegnoForWrite(relation));
+		oldcxt = MemoryContextSwitchTo(appendOnlyDMLStates.stateCxt);
+		insertDesc = appendonly_insert_init(relation,
+											ChooseSegnoForWrite(relation),
+											num_rows);
+		/*
+		 * If we have a unique index, insert a placeholder block directory row
+		 * to entertain uniqueness checks from concurrent inserts. See
+		 * AppendOnlyBlockDirectory_InsertPlaceholder() for details.
+		 */
+		if (relationHasUniqueIndex(relation))
+		{
+			int64 firstRowNum = insertDesc->lastSequence + 1;
+			BufferedAppend *bufferedAppend = &insertDesc->storageWrite.bufferedAppend;
+			int64 fileOffset = BufferedAppendNextBufferPosition(bufferedAppend);
+
+			AppendOnlyBlockDirectory_InsertPlaceholder(&insertDesc->blockDirectory,
+													   firstRowNum,
+													   fileOffset,
+													   0);
+		}
+		state->insertDesc = insertDesc;
 		MemoryContextSwitchTo(oldcxt);
 	}
 
@@ -298,7 +346,7 @@ get_insert_descriptor(const Relation relation)
  * Retrieve the deleteDescriptor for a relation. Initialize it if needed.
  */
 static AppendOnlyDeleteDesc
-get_delete_descriptor(const Relation relation, bool forUpdate)
+get_or_create_delete_descriptor(const Relation relation, bool forUpdate)
 {
 	AppendOnlyDMLState *state;
 
@@ -306,25 +354,9 @@ get_delete_descriptor(const Relation relation, bool forUpdate)
 
 	if (state->deleteDesc == NULL)
 	{
-		/*
-		 * GPDB_12_MERGE_FIXME: Can we perform this check earlier on?
-		 * Example during init? Idealy should be called on master node first,
-		 * that way we will avoid the dispatch.
-		 */
 		MemoryContext oldcxt;
-		if (IsolationUsesXactSnapshot())
-		{
-			if (forUpdate)
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("updates on append-only tables are not supported in serializable transactions")));
-			else
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("deletes on append-only tables are not supported in serializable transactions")));
-		}
 
-		oldcxt = MemoryContextSwitchTo(appendOnlyLocal.stateCxt);
+		oldcxt = MemoryContextSwitchTo(appendOnlyDMLStates.stateCxt);
 		state->deleteDesc = appendonly_delete_init(relation);
 		MemoryContextSwitchTo(oldcxt);
 	}
@@ -332,6 +364,50 @@ get_delete_descriptor(const Relation relation, bool forUpdate)
 	return state->deleteDesc;
 }
 
+static AppendOnlyUniqueCheckDesc
+get_or_create_unique_check_desc(Relation relation, Snapshot snapshot)
+{
+	AppendOnlyDMLState *state = find_dml_state(RelationGetRelid(relation));
+
+	if (!state->uniqueCheckDesc)
+	{
+		MemoryContext oldcxt;
+		AppendOnlyUniqueCheckDesc uniqueCheckDesc;
+
+		oldcxt = MemoryContextSwitchTo(appendOnlyDMLStates.stateCxt);
+		uniqueCheckDesc = palloc0(sizeof(AppendOnlyUniqueCheckDescData));
+
+		/* Initialize the block directory */
+		uniqueCheckDesc->blockDirectory = palloc0(sizeof(AppendOnlyBlockDirectory));
+		AppendOnlyBlockDirectory_Init_forUniqueChecks(uniqueCheckDesc->blockDirectory,
+													  relation,
+													  1, /* numColGroups */
+													  snapshot);
+
+		/*
+		 * If this is part of an update, we need to reuse the visimap used by
+		 * the delete half of the update. This is to avoid spurious conflicts
+		 * when the key's previous and new value are identical. Using the
+		 * visimap from the delete half ensures that the visimap can recognize
+		 * any tuples deleted by us prior to this insert, within this command.
+		 */
+		if (state->deleteDesc)
+			uniqueCheckDesc->visimap = &state->deleteDesc->visibilityMap;
+		else
+		{
+			/* Initialize the visimap */
+			uniqueCheckDesc->visimap = palloc0(sizeof(AppendOnlyVisimap));
+			AppendOnlyVisimap_Init_forUniqueCheck(uniqueCheckDesc->visimap,
+												  relation,
+												  snapshot);
+		}
+
+		state->uniqueCheckDesc = uniqueCheckDesc;
+		MemoryContextSwitchTo(oldcxt);
+	}
+
+	return state->uniqueCheckDesc;
+}
 
 /* ------------------------------------------------------------------------
  * Slot related callbacks for appendonly AM
@@ -348,12 +424,10 @@ appendonly_slot_callbacks(Relation relation)
 }
 
 MemTuple
-ExecFetchSlotMemTuple(TupleTableSlot *slot, bool *shouldFree, MemTupleBinding *mt_bind)
+appendonly_form_memtuple(TupleTableSlot *slot, MemTupleBinding *mt_bind)
 {
 	MemTuple		result;
 	MemoryContext	oldContext;
-
-	*shouldFree = true;
 
 	/*
 	 * In case of a non virtal tuple, make certain that the slot's values are
@@ -369,6 +443,15 @@ ExecFetchSlotMemTuple(TupleTableSlot *slot, bool *shouldFree, MemTupleBinding *m
 	MemoryContextSwitchTo(oldContext);
 
 	return result;
+}
+
+/*
+ * appendonly_free_memtuple
+ */
+void
+appendonly_free_memtuple(MemTuple tuple)
+{
+	pfree(tuple);
 }
 
 /* ------------------------------------------------------------------------
@@ -421,7 +504,15 @@ appendonly_index_fetch_begin(Relation rel)
 static void
 appendonly_index_fetch_reset(IndexFetchTableData *scan)
 {
-	// GPDB_12_MERGE_FIXME: Should we close the underlying AO fetch desc here?
+	/*
+	 * Unlike Heap, we don't release the resources (fetch descriptor and its
+	 * members) here because it is more like a global data structure shared
+	 * across scans, rather than an iterator to yield a granularity of data.
+	 * 
+	 * Additionally, should be aware of that no matter whether allocation or
+	 * release on fetch descriptor, it is considerably expensive.
+	 */
+	return;
 }
 
 static void
@@ -435,6 +526,8 @@ appendonly_index_fetch_end(IndexFetchTableData *scan)
 		pfree(aoscan->aofetch);
 		aoscan->aofetch = NULL;
 	}
+
+	pfree(aoscan);
 }
 
 static bool
@@ -465,15 +558,135 @@ appendonly_index_fetch_tuple(struct IndexFetchTableData *scan,
 								  snapshot,
 								  appendOnlyMetaDataSnapshot);
 	}
-	else
-	{
-		/* GPDB_12_MERGE_FIXME: Is it possible for the 'snapshot' to change
-		 * between calls? Add a sanity check for that here. */
-	}
+	/*
+	 * There is no reason to expect changes on snapshot between tuple
+	 * fetching calls after fech_init is called, treat it as a
+	 * programming error in case of occurrence.
+	 */
+	Assert(aoscan->aofetch->snapshot == snapshot);
 
 	appendonly_fetch(aoscan->aofetch, (AOTupleId *) tid, slot);
 
+	/*
+	 * Currently, we don't determine this parameter. By contract, it is to be
+	 * set to true iff we can determine that this row is dead to all
+	 * transactions. Failure to set this will lead to use of a garbage value
+	 * in certain code, such as that for unique index checks.
+	 * This is typically used for HOT chains, which we don't support.
+	 */
+	if (all_dead)
+		*all_dead = false;
+
+	/* Currently, we don't determine this parameter. By contract, it is to be
+	 * set to true iff there is another tuple for the tid, so that we can prompt
+	 * the caller to call index_fetch_tuple() again for the same tid.
+	 * This is typically used for HOT chains, which we don't support.
+	 */
+	if (call_again)
+		*call_again = false;
+
 	return !TupIsNull(slot);
+}
+
+/*
+ * Check if a visible tuple exists given the tid and a snapshot. This is
+ * currently used to determine uniqueness checks.
+ *
+ * We determine existence simply by checking if a *visible* block directory
+ * entry covers the given tid.
+ *
+ * There is no need to fetch the tuple (we actually can't reliably do so as
+ * we might encounter a placeholder row in the block directory)
+ *
+ * If no visible block directory entry exists, we are done. If it does, we need
+ * to further check the visibility of the tuple itself by consulting the visimap.
+ * Now, the visimap check can be skipped if the tuple was found to have been
+ * inserted by a concurrent in-progress transaction, in which case we return
+ * true and have the xwait machinery kick in.
+ */
+static bool
+appendonly_index_fetch_tuple_exists(Relation rel,
+									ItemPointer tid,
+									Snapshot snapshot,
+									bool *all_dead)
+{
+	AppendOnlyUniqueCheckDesc 	uniqueCheckDesc;
+	AOTupleId 					*aoTupleId = (AOTupleId *) tid;
+	bool						visible;
+
+#ifdef USE_ASSERT_CHECKING
+	int			segmentFileNum = AOTupleIdGet_segmentFileNum(aoTupleId);
+	int64		rowNum = AOTupleIdGet_rowNum(aoTupleId);
+
+	Assert(segmentFileNum != InvalidFileSegNumber);
+	Assert(rowNum != InvalidAORowNum);
+	/*
+	 * Since this can only be called in the context of a unique index check, the
+	 * snapshots that are supplied can only be non-MVCC snapshots: SELF and DIRTY.
+	 */
+	Assert(snapshot->snapshot_type == SNAPSHOT_SELF ||
+		   snapshot->snapshot_type == SNAPSHOT_DIRTY);
+#endif
+
+	/*
+	 * Currently, we don't determine this parameter. By contract, it is to be
+	 * set to true iff we can determine that this row is dead to all
+	 * transactions. Failure to set this will lead to use of a garbage value
+	 * in certain code, such as that for unique index checks.
+	 * This is typically used for HOT chains, which we don't support.
+	 */
+	if (all_dead)
+		*all_dead = false;
+
+	/*
+	 * FIXME: for when we want CREATE UNIQUE INDEX CONCURRENTLY to work
+	 * Unique constraint violation checks with SNAPSHOT_SELF are currently
+	 * required to support CREATE UNIQUE INDEX CONCURRENTLY. Currently, the
+	 * sole placeholder row inserted at first insert might not be visible to
+	 * the snapshot, if it was already updated by its actual first row. So,
+	 * we would need to flush a placeholder row at the beginning of each new
+	 * in-memory minipage. Currently, CREATE INDEX CONCURRENTLY isn't
+	 * supported, so we assume such a check satisfies SNAPSHOT_SELF.
+	 */
+	if (snapshot->snapshot_type == SNAPSHOT_SELF)
+		return true;
+
+	uniqueCheckDesc = get_or_create_unique_check_desc(rel, snapshot);
+
+	/* First, scan the block directory */
+	if (!AppendOnlyBlockDirectory_UniqueCheck(uniqueCheckDesc->blockDirectory,
+											  aoTupleId,
+											  snapshot))
+		return false;
+
+	/*
+	 * If the xmin or xmax are set for the dirty snapshot, after the block
+	 * directory is scanned with the snapshot, it means that there is a
+	 * concurrent in-progress transaction inserting the tuple. So, return true
+	 * and have the xwait machinery kick in.
+	 */
+	Assert(snapshot->snapshot_type == SNAPSHOT_DIRTY);
+	if (TransactionIdIsValid(snapshot->xmin) || TransactionIdIsValid(snapshot->xmax))
+		return true;
+
+	/* Now, consult the visimap */
+	visible = AppendOnlyVisimap_UniqueCheck(uniqueCheckDesc->visimap,
+											aoTupleId,
+											snapshot);
+
+	/*
+	 * Since we disallow deletes and updates running in parallel with inserts,
+	 * there is no way that the dirty snapshot has it's xmin and xmax populated
+	 * after the visimap has been scanned with it.
+	 *
+	 * Note: we disallow it by grabbing an ExclusiveLock on the QD (See
+	 * CdbTryOpenTable()). So if we are running in utility mode, there is no
+	 * such restriction.
+	 */
+	AssertImply(Gp_role != GP_ROLE_UTILITY,
+				(!TransactionIdIsValid(snapshot->xmin) && !TransactionIdIsValid(snapshot->xmax)));
+
+	return visible;
 }
 
 
@@ -569,10 +782,15 @@ appendonly_tuple_insert(Relation relation, TupleTableSlot *slot, CommandId cid,
 {
 	AppendOnlyInsertDesc    insertDesc;
 	MemTuple				mtuple;
-	bool					shouldFree = true;
 
-	insertDesc = get_insert_descriptor(relation);
-	mtuple = ExecFetchSlotMemTuple(slot, &shouldFree, insertDesc->mt_bind);
+	/* Fetch the insert desc, which likely already has been created
+	 *
+	 * Note: since we don't know how many rows will actually be inserted (as we
+	 * don't know how many rows are visible), we provide the default number of
+	 * rows to bump gp_fastsequence by.
+	 */
+	insertDesc = get_or_create_ao_insert_descriptor(relation, NUM_FAST_SEQUENCES);
+	mtuple = appendonly_form_memtuple(slot, insertDesc->mt_bind);
 
 	/* Update the tuple with table oid */
 	slot->tts_tableOid = RelationGetRelid(relation);
@@ -582,8 +800,7 @@ appendonly_tuple_insert(Relation relation, TupleTableSlot *slot, CommandId cid,
 
 	pgstat_count_heap_insert(relation, 1);
 
-	if (shouldFree)
-		pfree(mtuple);
+	appendonly_free_memtuple(mtuple);
 }
 
 static void
@@ -606,17 +823,20 @@ appendonly_tuple_complete_speculative(Relation relation, TupleTableSlot *slot,
  *	appendonly_multi_insert	- insert multiple tuples into an ao relation
  *
  * This is like appendonly_tuple_insert(), but inserts multiple tuples in one
- * operation. Typicaly used by COPY. This is preferrable than calling
- * appendonly_tuple_insert() in a loop because ... WAL??
+ * operation. Typically used by COPY.
+ *
+ * In the ao_row AM, we already realize the benefits of batched WAL (WAL is
+ * generated only when the insert buffer is full). There is also no page locking
+ * that we can optimize, as ao_row relations don't use the PG buffer cache. So,
+ * this is a thin layer over appendonly_tuple_insert() with one important
+ * optimization: We allocate the insert desc with ntuples up front, which can
+ * reduce the number of gp_fast_sequence allocations.
  */
 static void
 appendonly_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 						CommandId cid, int options, BulkInsertState bistate)
 {
-	/*
-	 * GPDB_12_MERGE_FIXME: Poor man's implementation for now in order to make
-	 * the tests pass. Implement properly.
-	 */
+	(void) get_or_create_ao_insert_descriptor(relation, ntuples);
 	for (int i = 0; i < ntuples; i++)
 		appendonly_tuple_insert(relation, slots[i], cid, options, bistate);
 }
@@ -629,7 +849,7 @@ appendonly_tuple_delete(Relation relation, ItemPointer tid, CommandId cid,
 	AppendOnlyDeleteDesc	deleteDesc;
 	TM_Result				result;
 
-	deleteDesc = get_delete_descriptor(relation, false);
+	deleteDesc = get_or_create_delete_descriptor(relation, false);
 	result = appendonly_delete(deleteDesc, (AOTupleId *) tid);
 	if (result == TM_Ok)
 		pgstat_count_heap_delete(relation);
@@ -659,16 +879,19 @@ appendonly_tuple_update(Relation relation, ItemPointer otid, TupleTableSlot *slo
 	AppendOnlyDeleteDesc	deleteDesc;
 	MemTuple				mtuple;
 	TM_Result				result;
-	bool					shouldFree = true;
 
-	insertDesc = get_insert_descriptor(relation);
-	deleteDesc = get_delete_descriptor(relation, true);
+	/*
+	 * Note: since we don't know how many rows will actually be inserted (as we
+	 * don't know how many rows are visible), we provide the default number of
+	 * rows to bump gp_fastsequence by.
+	 */
+	insertDesc = get_or_create_ao_insert_descriptor(relation, NUM_FAST_SEQUENCES);
+	deleteDesc = get_or_create_delete_descriptor(relation, true);
 
 	/* Update the tuple with table oid */
 	slot->tts_tableOid = RelationGetRelid(relation);
 
-	mtuple = ExecFetchSlotMemTuple(slot, &shouldFree,
-								   insertDesc->mt_bind);
+	mtuple = appendonly_form_memtuple(slot, insertDesc->mt_bind);
 
 #ifdef FAULT_INJECTOR
 	FaultInjector_InjectFaultIfSet(
@@ -689,8 +912,7 @@ appendonly_tuple_update(Relation relation, ItemPointer otid, TupleTableSlot *slo
 	/* No HOT updates with AO tables. */
 	*update_indexes = true;
 
-	if (shouldFree)
-		pfree(mtuple);
+	appendonly_free_memtuple(mtuple);
 
 	return result;
 }
@@ -708,7 +930,7 @@ appendonly_tuple_lock(Relation relation, ItemPointer tid, Snapshot snapshot,
 static void
 appendonly_finish_bulk_insert(Relation relation, int options)
 {
-	appendonly_dml_finish(relation, CMD_INSERT);
+	appendonly_dml_finish(relation);
 }
 
 
@@ -767,7 +989,7 @@ appendonly_relation_set_new_filenode(Relation rel,
 			   rel->rd_rel->relkind == RELKIND_MATVIEW ||
 			   rel->rd_rel->relkind == RELKIND_TOASTVALUE);
 		smgrcreate(srel, INIT_FORKNUM, false);
-		log_smgrcreate(newrnode, INIT_FORKNUM);
+		log_smgrcreate(newrnode, INIT_FORKNUM, SMGR_AO);
 		smgrimmedsync(srel, INIT_FORKNUM);
 	}
 
@@ -834,7 +1056,7 @@ appendonly_relation_copy_data(Relation rel, const RelFileNode *newrnode)
 		 */
 		smgrcreate(dstrel, INIT_FORKNUM, false);
 
-		log_smgrcreate(newrnode, INIT_FORKNUM);
+		log_smgrcreate(newrnode, INIT_FORKNUM, SMGR_AO);
 	}
 
 	/* drop old relation, and close new one */
@@ -1005,7 +1227,7 @@ appendonly_relation_copy_for_cluster(Relation OldHeap, Relation NewHeap,
 	
 	write_seg_no = ChooseSegnoForWrite(NewHeap);
 
-	aoInsertDesc = appendonly_insert_init(NewHeap, write_seg_no);
+	aoInsertDesc = appendonly_insert_init(NewHeap, write_seg_no, (int64) *num_tuples);
 
 	/* Insert sorted heap tuples into new storage */
 	for (;;)
@@ -1111,8 +1333,6 @@ appendonly_index_build_range_scan(Relation heapRelation,
 	EState	   *estate;
 	ExprContext *econtext;
 	Snapshot	snapshot;
-	bool		need_unregister_snapshot = false;
-	TransactionId OldestXmin;
 
 	/*
 	 * sanity checks
@@ -1152,35 +1372,15 @@ appendonly_index_build_range_scan(Relation heapRelation,
 	/* Set up execution state for predicate, if any. */
 	predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
 
-	/*
-	 * Prepare for scan of the base relation.  In a normal index build, we use
-	 * SnapshotAny because we must retrieve all tuples and do our own time
-	 * qual checks (because we have to index RECENTLY_DEAD tuples). In a
-	 * concurrent build, or during bootstrap, we take a regular MVCC snapshot
-	 * and index whatever's live according to that.
-	 */
-	OldestXmin = InvalidTransactionId;
-
-	/* okay to ignore lazy VACUUMs here */
-	if (!IsBootstrapProcessingMode() && !indexInfo->ii_Concurrent)
-		OldestXmin = GetOldestXmin(heapRelation, PROCARRAY_FLAGS_VACUUM);
-
 	if (!scan)
 	{
 		/*
 		 * Serial index build.
 		 *
-		 * Must begin our own heap scan in this case.  We may also need to
-		 * register a snapshot whose lifetime is under our direct control.
+		 * XXX: We always use SnapshotAny here. An MVCC snapshot and oldest xmin
+		 * calculation is necessary to support indexes built CONCURRENTLY.
 		 */
-		if (!TransactionIdIsValid(OldestXmin))
-		{
-			snapshot = RegisterSnapshot(GetTransactionSnapshot());
-			need_unregister_snapshot = true;
-		}
-		else
-			snapshot = SnapshotAny;
-
+		snapshot = SnapshotAny;
 		scan = table_beginscan_strat(heapRelation,	/* relation */
 									 snapshot,	/* snapshot */
 									 0, /* number of keys */
@@ -1257,17 +1457,6 @@ appendonly_index_build_range_scan(Relation heapRelation,
 	}
 #endif
 
-	/*
-	 * Must call GetOldestXmin() with SnapshotAny.  Should never call
-	 * GetOldestXmin() with MVCC snapshot. (It's especially worth checking
-	 * this for parallel builds, since ambuild routines that support parallel
-	 * builds must work these details out for themselves.)
-	 */
-	Assert(snapshot == SnapshotAny || IsMVCCSnapshot(snapshot));
-	Assert(snapshot == SnapshotAny ? TransactionIdIsValid(OldestXmin) :
-		   !TransactionIdIsValid(OldestXmin));
-	Assert(snapshot == SnapshotAny || !anyvisible);
-
 	/* set our scan endpoints */
 	if (!allow_sync)
 	{
@@ -1287,6 +1476,7 @@ appendonly_index_build_range_scan(Relation heapRelation,
 	while (appendonly_getnextslot(&aoscan->rs_base, ForwardScanDirection, slot))
 	{
 		bool		tupleIsAlive;
+		AOTupleId 	*aoTupleId;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -1315,14 +1505,20 @@ appendonly_index_build_range_scan(Relation heapRelation,
 		}
 #endif
 
+		aoTupleId = (AOTupleId *) &slot->tts_tid;
 		/*
-		 * appendonly_getnext did the time qual check
-		 *
-		 * GPDB_12_MERGE_FIXME: in heapam, we do visibility checks in SnapshotAny case
-		 * here. Is that not needed with AO tables?
+		 * We didn't perform the check to see if the tuple was deleted in
+		 * appendonlygettup(), since we passed it SnapshotAny. See
+		 * appendonlygettup() for details. We need to do this to avoid spurious
+		 * conflicts with deleted tuples for unique index builds.
 		 */
-		tupleIsAlive = true;
-		reltuples += 1;
+		if (AppendOnlyVisimap_IsVisible(&aoscan->visibilityMap, aoTupleId))
+		{
+			tupleIsAlive = true;
+			reltuples += 1;
+		}
+		else
+			tupleIsAlive = false; /* excluded from unique-checking */
 
 		MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
@@ -1387,10 +1583,6 @@ appendonly_index_build_range_scan(Relation heapRelation,
 #endif
 
 	table_endscan(scan);
-
-	/* we can now forget our snapshot, if set and registered by us */
-	if (need_unregister_snapshot)
-		UnregisterSnapshot(snapshot);
 
 	ExecDropSingleTupleTableSlot(slot);
 
@@ -1935,6 +2127,10 @@ static const TableAmRoutine ao_row_methods = {
 	.index_fetch_reset = appendonly_index_fetch_reset,
 	.index_fetch_end = appendonly_index_fetch_end,
 	.index_fetch_tuple = appendonly_index_fetch_tuple,
+	.index_fetch_tuple_exists = appendonly_index_fetch_tuple_exists,
+
+	.dml_init = appendonly_dml_init,
+	.dml_finish = appendonly_dml_finish,
 
 	.tuple_insert = appendonly_tuple_insert,
 	.tuple_insert_speculative = appendonly_tuple_insert_speculative,

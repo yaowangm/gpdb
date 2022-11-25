@@ -307,7 +307,7 @@ SELECT c_bigint, c_text FROM T WHERE c_bigint = -1 LIMIT 1;
                      Output: c_bigint, c_text
                      Filter: (t.c_bigint = '-1'::integer)
  Optimizer: Postgres query optimizer
- Settings: optimizer=off
+ Settings: optimizer = 'off', seq_page_cost = '1'
 (11 rows)
 
 SELECT c_bigint, c_text FROM T WHERE c_text = 'hello' LIMIT 1;
@@ -329,7 +329,7 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) SELECT c_bigint, c_text FROM T WHERE c_text 
                      Output: c_bigint, c_text
                      Filter: (t.c_text = 'hello'::text)
  Optimizer: Postgres query optimizer
- Settings: optimizer=off
+ Settings: optimizer = 'off', seq_page_cost = '1'
 (11 rows)
 
 -- COALESCE
@@ -390,7 +390,7 @@ SELECT * FROM T ORDER BY c_bigint, c_text, pk LIMIT 10;
                      ->  Seq Scan on fast_default.t
                            Output: pk, c_bigint, c_text
  Optimizer: Postgres query optimizer
- Settings: optimizer=off
+ Settings: optimizer = 'off', seq_page_cost = '1'
 (14 rows)
 
 -- LIMIT
@@ -427,7 +427,7 @@ SELECT * FROM T WHERE c_bigint > -1 ORDER BY c_bigint, c_text, pk LIMIT 10;
                            Output: pk, c_bigint, c_text
                            Filter: (t.c_bigint > '-1'::integer)
  Optimizer: Postgres query optimizer
- Settings: optimizer=off
+ Settings: optimizer = 'off', seq_page_cost = '1'
 (15 rows)
 
 --  DELETE with RETURNING
@@ -459,7 +459,7 @@ DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *;
                Output: ctid, gp_segment_id
                Filter: ((t.pk >= 10) AND (t.pk <= 20))
  Optimizer: Postgres query optimizer
- Settings: optimizer=off
+ Settings: optimizer = 'off', seq_page_cost = '1'
 (9 rows)
 
 -- UPDATE

@@ -1541,4 +1541,18 @@ CExpression::DeriveHasScalarFuncProject()
 	exprhdl.Attach(this);
 	return m_pdpscalar->DeriveHasScalarFuncProject(exprhdl);
 }
+ULONG
+CExpression::DeriveTotalOrderedAggs()
+{
+	CExpressionHandle exprhdl(m_mp);
+	exprhdl.Attach(this);
+	return m_pdpscalar->DeriveTotalOrderedAggs(exprhdl);
+}
+BOOL
+CExpression::DeriveContainsOnlyReplicationSafeAggFuncs()
+{
+	CExpressionHandle exprhdl(m_mp);
+	exprhdl.Attach(this);
+	return m_pdpscalar->DeriveContainsOnlyReplicationSafeAggFuncs(exprhdl);
+}
 // EOF

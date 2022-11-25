@@ -70,7 +70,6 @@ CParseHandlerFactory::Init(CMemoryPool *mp)
 		{EdxltokenGPDBScalarOp, &CreateMDScalarOpParseHandler},
 		{EdxltokenGPDBFunc, &CreateMDFuncParseHandler},
 		{EdxltokenGPDBAgg, &CreateMDAggParseHandler},
-		{EdxltokenGPDBTrigger, &CreateMDTriggerParseHandler},
 		{EdxltokenCheckConstraint, &CreateMDChkConstraintParseHandler},
 		{EdxltokenRelationStats, &CreateRelStatsParseHandler},
 		{EdxltokenColumnStats, &CreateColStatsParseHandler},
@@ -89,6 +88,8 @@ CParseHandlerFactory::Init(CMemoryPool *mp)
 		{EdxltokenPhysicalAggregate, &CreateAggParseHandler},
 		{EdxltokenPhysicalTableScan, &CreateTableScanParseHandler},
 		{EdxltokenPhysicalBitmapTableScan, &CreateBitmapTableScanParseHandler},
+		{EdxltokenPhysicalDynamicBitmapTableScan,
+		 &CreateDynBitmapTableScanParseHandler},
 		{EdxltokenPhysicalExternalScan, &CreateExternalScanParseHandler},
 		{EdxltokenPhysicalHashJoin, &CreateHashJoinParseHandler},
 		{EdxltokenPhysicalNLJoin, &CreateNLJoinParseHandler},
@@ -106,6 +107,8 @@ CParseHandlerFactory::Init(CMemoryPool *mp)
 		{EdxltokenPhysicalSort, &CreateSortParseHandler},
 		{EdxltokenPhysicalAppend, &CreateAppendParseHandler},
 		{EdxltokenPhysicalMaterialize, &CreateMaterializeParseHandler},
+		{EdxltokenPhysicalDynamicTableScan, &CreateDTSParseHandler},
+		{EdxltokenPhysicalDynamicIndexScan, &CreateDynamicIdxScanParseHandler},
 		{EdxltokenPhysicalPartitionSelector,
 		 &CreatePartitionSelectorParseHandler},
 		{EdxltokenPhysicalSequence, &CreateSequenceParseHandler},
@@ -238,7 +241,6 @@ CParseHandlerFactory::Init(CMemoryPool *mp)
 		{EdxltokenPhysicalDMLDelete, &CreatePhysicalDMLParseHandler},
 		{EdxltokenPhysicalDMLUpdate, &CreatePhysicalDMLParseHandler},
 		{EdxltokenPhysicalSplit, &CreatePhysicalSplitParseHandler},
-		{EdxltokenPhysicalRowTrigger, &CreatePhysicalRowTriggerParseHandler},
 		{EdxltokenPhysicalAssert, &CreatePhysicalAssertParseHandler},
 		{EdxltokenPhysicalCTEProducer, &CreatePhysicalCTEProdParseHandler},
 		{EdxltokenPhysicalCTEConsumer, &CreatePhysicalCTEConsParseHandler},
@@ -554,16 +556,6 @@ CParseHandlerFactory::CreateMDAggParseHandler(
 		CParseHandlerMDGPDBAgg(mp, parse_handler_mgr, parse_handler_root);
 }
 
-// creates a parse handler for parsing GPDB-specific trigger metadata
-CParseHandlerBase *
-CParseHandlerFactory::CreateMDTriggerParseHandler(
-	CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
-	CParseHandlerBase *parse_handler_root)
-{
-	return GPOS_NEW(mp)
-		CParseHandlerMDGPDBTrigger(mp, parse_handler_mgr, parse_handler_root);
-}
-
 // creates a parse handler for parsing GPDB-specific cast metadata
 CParseHandlerBase *
 CParseHandlerFactory::CreateMDCastParseHandler(
@@ -693,6 +685,16 @@ CParseHandlerFactory::CreateBitmapTableScanParseHandler(
 		mp, parse_handler_mgr, parse_handler_root);
 }
 
+// creates a parse handler for parsing a dynamic bitmap table scan
+CParseHandlerBase *
+CParseHandlerFactory::CreateDynBitmapTableScanParseHandler(
+	CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
+	CParseHandlerBase *parse_handler_root)
+{
+	return GPOS_NEW(mp) CParseHandlerPhysicalDynamicBitmapTableScan(
+		mp, parse_handler_mgr, parse_handler_root);
+}
+
 // creates a parse handler for parsing an external scan
 CParseHandlerBase *
 CParseHandlerFactory::CreateExternalScanParseHandler(
@@ -781,6 +783,26 @@ CParseHandlerFactory::CreateMaterializeParseHandler(
 {
 	return GPOS_NEW(mp)
 		CParseHandlerMaterialize(mp, parse_handler_mgr, parse_handler_root);
+}
+
+// creates a parse handler for parsing a dynamic table scan operator
+CParseHandlerBase *
+CParseHandlerFactory::CreateDTSParseHandler(
+	CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
+	CParseHandlerBase *parse_handler_root)
+{
+	return GPOS_NEW(mp) CParseHandlerDynamicTableScan(mp, parse_handler_mgr,
+													  parse_handler_root);
+}
+
+// creates a parse handler for parsing a dynamic index scan operator
+CParseHandlerBase *
+CParseHandlerFactory::CreateDynamicIdxScanParseHandler(
+	CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
+	CParseHandlerBase *parse_handler_root)
+{
+	return GPOS_NEW(mp) CParseHandlerDynamicIndexScan(mp, parse_handler_mgr,
+													  parse_handler_root);
 }
 
 // creates a parse handler for parsing a partition selector operator
@@ -1907,16 +1929,6 @@ CParseHandlerFactory::CreatePhysicalSplitParseHandler(
 {
 	return GPOS_NEW(mp)
 		CParseHandlerPhysicalSplit(mp, parse_handler_mgr, parse_handler_root);
-}
-
-//	creates a parse handler for parsing a physical row trigger operator
-CParseHandlerBase *
-CParseHandlerFactory::CreatePhysicalRowTriggerParseHandler(
-	CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
-	CParseHandlerBase *parse_handler_root)
-{
-	return GPOS_NEW(mp) CParseHandlerPhysicalRowTrigger(mp, parse_handler_mgr,
-														parse_handler_root);
 }
 
 // creates a parse handler for parsing a physical assert operator

@@ -39,6 +39,7 @@ static bool describeOneTableDetails(const char *schemaname,
 									bool verbose);
 static void add_external_table_footer(printTableContent *const cont, const char *oid);
 static void add_distributed_by_footer(printTableContent *const cont, const char *oid);
+static void add_partition_by_footer(printTableContent *const cont, const char *oid);
 static void add_tablespace_footer(printTableContent *const cont, char relkind,
 								  Oid tablespace, const bool newline);
 static void add_role_attribute(PQExpBuffer buf, const char *const str);
@@ -2070,8 +2071,9 @@ describeOneTableDetails(const char *schemaname,
 		goto error_return;		/* not an error, just return early */
 	}
 
-	if (greenplum_is_ao_column(tableinfo.relstorage, tableinfo.relam)
-			|| greenplum_is_ao_row(tableinfo.relstorage, tableinfo.relam))
+	if (tableinfo.relkind != RELKIND_PARTITIONED_TABLE &&
+		(greenplum_is_ao_column(tableinfo.relstorage, tableinfo.relam)
+			|| greenplum_is_ao_row(tableinfo.relstorage, tableinfo.relam)))
 	{
 		PGresult *result = NULL;
 		/* Get Append Only information
@@ -2290,6 +2292,18 @@ describeOneTableDetails(const char *schemaname,
 			else
 				printfPQExpBuffer(&title, _("Partitioned table \"%s.%s\""),
 								  schemaname, relationname);
+			break;
+		case RELKIND_AOSEGMENTS:
+			printfPQExpBuffer(&title, _("Appendonly segment entry table: \"%s.%s\""),
+							  schemaname, relationname);
+			break;
+		case RELKIND_AOVISIMAP:
+			printfPQExpBuffer(&title, _("Appendonly visibility map table: \"%s.%s\""),
+							  schemaname, relationname);
+			break;
+		case RELKIND_AOBLOCKDIR:
+			printfPQExpBuffer(&title, _("Appendonly block directory table: \"%s.%s\""),
+							  schemaname, relationname);
 			break;
 		default:
 			/* untranslated unknown relkind */
@@ -2634,7 +2648,10 @@ describeOneTableDetails(const char *schemaname,
 	else if (tableinfo.relkind == RELKIND_RELATION ||
 			 tableinfo.relkind == RELKIND_MATVIEW ||
 			 tableinfo.relkind == RELKIND_FOREIGN_TABLE ||
-			 tableinfo.relkind == RELKIND_PARTITIONED_TABLE)
+			 tableinfo.relkind == RELKIND_PARTITIONED_TABLE ||
+			 tableinfo.relkind == RELKIND_AOSEGMENTS ||
+			 tableinfo.relkind == RELKIND_AOBLOCKDIR ||
+			 tableinfo.relkind == RELKIND_AOVISIMAP)
 	{
 		/* Footer information about a table */
 		PGresult   *result = NULL;
@@ -2645,8 +2662,9 @@ describeOneTableDetails(const char *schemaname,
 			add_external_table_footer(&cont, oid);
 
 		/* print append only table information */
-		if (greenplum_is_ao_row(tableinfo.relstorage, tableinfo.relam) ||
-			greenplum_is_ao_column(tableinfo.relstorage, tableinfo.relam))
+		if (tableinfo.relkind != RELKIND_PARTITIONED_TABLE &&
+			(greenplum_is_ao_row(tableinfo.relstorage, tableinfo.relam) ||
+			greenplum_is_ao_column(tableinfo.relstorage, tableinfo.relam)))
 		{
 			if (greenplum_is_ao_row(tableinfo.relstorage, tableinfo.relam))
 			{
@@ -3646,12 +3664,9 @@ describeOneTableDetails(const char *schemaname,
 		/* mpp addition start: dump distributed by clause */
 		add_distributed_by_footer(&cont, oid);
 
-		/* GPDB_12_MERGE_FIXME: legacy partitioning. Still needed for old server versions? */
-#if 0
-		/* print 'partition by' clause */
-		if (tuples > 0)
+		/* Still needed by legacy partitioning to print old version server's 'partition by' clause */
+		if (!isGPDB7000OrLater() && tuples > 0)
 			add_partition_by_footer(&cont, oid);
-#endif
 
 		/* Tablespace info */
 		add_tablespace_footer(&cont, tableinfo.relkind, tableinfo.tablespace,
@@ -4137,8 +4152,6 @@ add_distributed_by_footer(printTableContent *const cont, const char *oid)
 /*
  * Add a 'partition by' description to the footer.
  */
-/* GPDB_12_MERGE_FIXME: legacy partitioning. Still needed for old server versions? */
-#if 0
 static void
 add_partition_by_footer(printTableContent *const cont, const char *oid)
 {
@@ -4217,7 +4230,6 @@ add_partition_by_footer(printTableContent *const cont, const char *oid)
 	termPQExpBuffer(&buf);
 	return;		/* success */
 }
-#endif
 
 /*
  * Add a tablespace description to a footer.  If 'newline' is true, it is added
@@ -4632,12 +4644,8 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
 	{
 		if (isGPDB7000OrLater())
 		{
-			appendPQExpBuffer(&buf, ", CASE c.relam");
-			appendPQExpBuffer(&buf, " WHEN %d THEN '%s'", HEAP_TABLE_AM_OID, gettext_noop("heap"));
-			appendPQExpBuffer(&buf, " WHEN %d THEN '%s'", AO_ROW_TABLE_AM_OID, gettext_noop("append only"));
-			appendPQExpBuffer(&buf, " WHEN %d THEN '%s'", AO_COLUMN_TABLE_AM_OID, gettext_noop("append only columnar"));
-			/* GPDB_12_MERGE_FIXME fill other storage types */
-			appendPQExpBuffer(&buf, " END as \"%s\"\n", gettext_noop("Storage"));
+			/* In GPDB7, we can have user defined access method, display the access method name directly */
+			appendPQExpBuffer(&buf, ", a.amname as \"%s\"\n", gettext_noop("Storage"));
 		}
 		else
 		{
@@ -4681,6 +4689,9 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
 	appendPQExpBufferStr(&buf,
 						 "\nFROM pg_catalog.pg_class c"
 						 "\n     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace");
+	if (showTables && isGPDB7000OrLater())
+		appendPQExpBufferStr(&buf,
+							"\n     LEFT JOIN pg_catalog.pg_am a ON a.oid = c.relam");
 	if (showIndexes)
 		appendPQExpBufferStr(&buf,
 							 "\n     LEFT JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid"

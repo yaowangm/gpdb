@@ -43,6 +43,7 @@
 #define AO_DEFAULT_COMPRESSTYPE   "none"
 #endif
 #define AO_DEFAULT_CHECKSUM       true
+#define ANALYZE_DEFAULT_HLL       false
 
 /* types supported by reloptions */
 typedef enum relopt_type
@@ -270,15 +271,16 @@ typedef struct
 
 extern relopt_kind add_reloption_kind(void);
 extern void add_bool_reloption(bits32 kinds, const char *name, const char *desc,
-							   bool default_val);
+							   bool default_val, LOCKMODE lockmode);
 extern void add_int_reloption(bits32 kinds, const char *name, const char *desc,
-							  int default_val, int min_val, int max_val);
+							  int default_val, int min_val, int max_val,
+							  LOCKMODE lockmode);
 extern void add_real_reloption(bits32 kinds, const char *name, const char *desc,
-							   double default_val, double min_val, double max_val);
+							   double default_val, double min_val,double max_val,
+							   LOCKMODE lockmode);
 extern void add_string_reloption(bits32 kinds, const char *name, const char *desc,
-								 const char *default_val, validate_string_relopt validator);
-
-extern void set_reloption_lockmode(const char *name, LOCKMODE lockmode);
+								 const char *default_val, validate_string_relopt validator,
+								 LOCKMODE lockmode);
 
 extern Datum transformRelOptions(Datum oldOptions, List *defList,
 								 const char *namspace, char *validnsps[],
@@ -309,6 +311,8 @@ extern LOCKMODE AlterTableGetRelOptionsLockLevel(List *defList);
 /* in reloptions_gp.c */
 extern Datum transformAOStdRdOptions(StdRdOptions *opts, Datum withOpts);
 
+extern bool relOptionsEquals(Datum oldOptions, Datum newOptions);
+
 extern void validateAppendOnlyRelOptions(int blocksize, int writesize,
 										 int complevel, char* comptype,
 										 bool checksum, bool co);
@@ -332,10 +336,13 @@ extern List *build_ao_rel_storage_opts(List *opts, Relation rel);
 
 /* attribute enconding specific functions */
 extern List *transformColumnEncoding(Relation rel, List *colDefs,
-										List *stenc, List *withOptions,
-										bool rootpartition, bool allowEncodingClause);
+										List *stenc, List *withOptions, List *parentenc,
+										bool explicitOnly, bool allowEncodingClause);
 extern List *transformStorageEncodingClause(List *options, bool validate);
+extern bool updateEncodingList(List *current_encodings,
+								  ColumnReferenceStorageDirective *new_crsd);
 extern List *form_default_storage_directive(List *enc);
 extern bool is_storage_encoding_directive(char *name);
+extern void free_options_deep(relopt_value *options, int num_options);
 
 #endif							/* RELOPTIONS_H */

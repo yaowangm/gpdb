@@ -52,6 +52,7 @@
 #include "cdb/cdbdisp_query.h"
 #include "cdb/memquota.h"
 #include "commands/resgroupcmds.h"
+#include "common/hashfn.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -594,8 +595,6 @@ InitResGroups(void)
 				(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
 				 errmsg("insufficient memory available"),
 				 errhint("Increase gp_resource_group_memory_limit")));
-
-	ResGroupOps_Init();
 
 	if (gp_resource_group_enable_cgroup_cpuset)
 	{

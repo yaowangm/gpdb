@@ -157,7 +157,7 @@ CTranslatorDXLToExpr::CTranslatorDXLToExpr(CMemoryPool *mp,
 										   CMDAccessor *md_accessor,
 										   BOOL fInitColumnFactory)
 	: m_mp(mp),
-	  m_sysid(IMDId::EmdidGPDB, GPMD_GPDB_SYSID),
+	  m_sysid(IMDId::EmdidGeneral, GPMD_GPDB_SYSID),
 	  m_pmda(md_accessor),
 	  m_phmulcr(nullptr),
 	  m_phmululCTE(nullptr),
@@ -545,7 +545,9 @@ CTranslatorDXLToExpr::PexprLogicalTVF(const CDXLNode *dxlnode)
 									popTVF->PdrgpcrOutput());
 
 	if (!popTVF->FuncMdId()->IsValid())
+	{
 		return pexpr;
+	}
 
 	const IMDFunction *pmdfunc = m_pmda->RetrieveFunc(mdid_func);
 
@@ -1472,6 +1474,26 @@ CTranslatorDXLToExpr::PexprLogicalUpdate(const CDXLNode *dxlnode)
 				   GPOS_WSZ_LIT("Update on replicated tables"));
 	}
 
+	const IMDRelation *pmdrel = m_pmda->RetrieveRel(ptabdesc->MDId());
+	if (pmdrel->IsPartitioned())
+	{
+		GPOS_ASSERT(EdxlopLogicalUpdate == pdxlopUpdate->GetDXLOperator());
+
+		IMdIdArray *partition_mdids = pmdrel->ChildPartitionMdids();
+		for (ULONG ul = 0; ul < partition_mdids->Size(); ++ul)
+		{
+			IMDId *part_mdid = (*partition_mdids)[ul];
+			const IMDRelation *partrel = m_pmda->RetrieveRel(part_mdid);
+
+			if (partrel->IsPartitioned())
+			{
+				// Multi-level partitioned tables are unsupported - fall back
+				GPOS_RAISE(gpdxl::ExmaMD, gpdxl::ExmiMDObjUnsupported,
+						   GPOS_WSZ_LIT("Multi-level partitioned tables"));
+			}
+		}
+	}
+
 	ULONG ctid_colid = pdxlopUpdate->GetCtIdColId();
 	ULONG segid_colid = pdxlopUpdate->GetSegmentIdColId();
 
@@ -1486,18 +1508,11 @@ CTranslatorDXLToExpr::PexprLogicalUpdate(const CDXLNode *dxlnode)
 	CColRefArray *pdrgpcrDelete =
 		CTranslatorDXLToExprUtils::Pdrgpcr(m_mp, m_phmulcr, pdrgpulDeleteCols);
 
-	CColRef *pcrTupleOid = nullptr;
-	if (pdxlopUpdate->IsOidsPreserved())
-	{
-		ULONG tuple_oid = pdxlopUpdate->GetTupleOid();
-		pcrTupleOid = LookupColRef(m_phmulcr, tuple_oid);
-	}
-
 	return GPOS_NEW(m_mp)
 		CExpression(m_mp,
 					GPOS_NEW(m_mp) CLogicalUpdate(m_mp, ptabdesc, pdrgpcrDelete,
 												  pdrgpcrInsert, pcrCtid,
-												  pcrSegmentId, pcrTupleOid),
+												  pcrSegmentId, true),
 					pexprChild);
 }
 
@@ -1893,9 +1908,17 @@ CTranslatorDXLToExpr::Pwf(const CDXLWindowFrame *window_frame)
 	{
 		efs = CWindowFrame::EfsRange;
 	}
+	else if (EdxlfsGroups == window_frame->ParseDXLFrameSpec())
+	{
+		efs = CWindowFrame::EfsGroups;
+	}
 
-	CWindowFrame *pwf = GPOS_NEW(m_mp)
-		CWindowFrame(m_mp, efs, efbLead, efbTrail, pexprLead, pexprTrail, efes);
+	CWindowFrame *pwf = GPOS_NEW(m_mp) CWindowFrame(
+		m_mp, efs, efbLead, efbTrail, pexprLead, pexprTrail, efes,
+		window_frame->PdxlnStartInRangeFunc(),
+		window_frame->PdxlnEndInRangeFunc(), window_frame->PdxlnInRangeColl(),
+		window_frame->PdxlnInRangeAsc(),
+		window_frame->PdxlnInRangeNullsFirst());
 
 	return pwf;
 }
@@ -2226,10 +2249,9 @@ CTranslatorDXLToExpr::RegisterMDRelationCtas(CDXLLogicalCTAS *pdxlopCTAS)
 	CMDRelationCtasGPDB *pmdrel = GPOS_NEW(m_mp) CMDRelationCtasGPDB(
 		m_mp, pdxlopCTAS->MDId(), mdname_schema,
 		GPOS_NEW(m_mp) CMDName(m_mp, pdxlopCTAS->MdName()->GetMDName()),
-		pdxlopCTAS->IsTemporary(), pdxlopCTAS->HasOids(),
-		pdxlopCTAS->RetrieveRelStorageType(), pdxlopCTAS->Ereldistrpolicy(),
-		mdcol_array, pdxlopCTAS->GetDistrColPosArray(), distr_opfamilies,
-		distr_opclasses,
+		pdxlopCTAS->IsTemporary(), pdxlopCTAS->RetrieveRelStorageType(),
+		pdxlopCTAS->Ereldistrpolicy(), mdcol_array,
+		pdxlopCTAS->GetDistrColPosArray(), distr_opfamilies, distr_opclasses,
 		GPOS_NEW(m_mp) ULongPtr2dArray(m_mp),  // keyset_array,
 		pdxlopCTAS->GetDxlCtasStorageOption(), vartypemod_array);
 

@@ -1,12 +1,37 @@
 import abc
 from typing import List
 
+from contextlib import closing
+from gppylib.db import dbconn
+from gppylib import gplog
 from gppylib.mainUtils import ExceptionNoStackTraceNeeded
 from gppylib.operations.detect_unreachable_hosts import get_unreachable_segment_hosts
 from gppylib.parseutils import line_reader, check_values, canonicalize_address
 from gppylib.utils import checkNotNone, normalizeAndValidateInputPath
 from gppylib.gparray import GpArray, Segment
 
+logger = gplog.get_default_logger()
+
+def get_segments_with_running_basebackup():
+    """
+    Returns a list of contentIds of source segments of running pg_basebackup processes
+    At present gp_stat_replication table does not contain any info about datadir and dbid of the target of running pg_basebackup
+    """
+
+    sql = "select gp_segment_id from gp_stat_replication where application_name = 'pg_basebackup'"
+
+    try:
+        with closing(dbconn.connect(dbconn.DbURL())) as conn:
+            res = dbconn.query(conn, sql)
+            rows = res.fetchall()
+    except Exception as e:
+        raise Exception("Failed to query gp_stat_replication: %s" %str(e))
+
+    segments_with_running_basebackup = {row[0] for row in rows}
+
+    if len(segments_with_running_basebackup) == 0:
+        logger.debug("No basebackup running")
+    return segments_with_running_basebackup
 
 class RecoveryTriplet:
     """
@@ -96,29 +121,31 @@ class RecoveryTripletRequest:
 # TODO: Note that gparray is mutated for all triplets, even if we skip recovery for them(if they are unreachable)
 class RecoveryTripletsFactory:
     @staticmethod
-    def instance(gpArray, config_file=None, new_hosts=[]):
+    def instance(gpArray, config_file=None, new_hosts=[], paralleldegree=1):
         """
         :param gpArray: The variable gpArray may get mutated when the getMirrorTriples function is called on this instance.
         :param config_file: user passed in config file, if any
         :param new_hosts: user passed in new hosts, if any
+        :param paralleldegree: number of max parallel threads to run, default is 1
         :return:
         """
         if config_file:
-            return RecoveryTripletsUserConfigFile(gpArray, config_file)
+            return RecoveryTripletsUserConfigFile(gpArray, config_file, paralleldegree)
         else:
             if not new_hosts:
-                return RecoveryTripletsInplace(gpArray)
+                return RecoveryTripletsInplace(gpArray, paralleldegree)
             else:
-                return RecoveryTripletsNewHosts(gpArray, new_hosts)
+                return RecoveryTripletsNewHosts(gpArray, new_hosts, paralleldegree)
 
 
 class RecoveryTriplets(abc.ABC):
-    def __init__(self, gpArray):
+    def __init__(self, gpArray, paralleldegree=1):
         """
         :param gpArray: Needs to be a shallow copy since we may return a mutated gpArray
         """
         self.gpArray = gpArray
         self.interfaceHostnameWarnings = []
+        self.paralleldegree = paralleldegree
 
     @abc.abstractmethod
     def getTriplets(self) -> List[RecoveryTriplet]:
@@ -128,6 +155,10 @@ class RecoveryTriplets(abc.ABC):
         be marked as down whereas for gprecoverseg the segment to be recovered needs to marked as down.
         """
         pass
+
+    def _get_unreachable_failover_hosts(self, requests) -> List[str]:
+        hostlist = {req.failover_host for req in requests if req.failover_host}
+        return get_unreachable_segment_hosts(hostlist, min(self.paralleldegree, len(hostlist)))
 
     def getInterfaceHostnameWarnings(self):
         return self.interfaceHostnameWarnings
@@ -140,15 +171,24 @@ class RecoveryTriplets(abc.ABC):
     # the state as if that recovery had already completed.
     def _convert_requests_to_triplets(self, requests: List[RecoveryTripletRequest]) -> List[RecoveryTriplet]:
         triplets = []
+        # Get list of hosts unreachable from the request
+        unreachable_failover_hosts = self._get_unreachable_failover_hosts(requests)
 
         dbIdToPeerMap = self.gpArray.getDbIdToPeerMap()
+
+        failed_segments_with_running_basebackup = []
+        segments_with_running_basebackup = get_segments_with_running_basebackup()
+
         for req in requests:
+            if req.failed.getSegmentContentId() in segments_with_running_basebackup:
+                failed_segments_with_running_basebackup.append(req.failed.getSegmentContentId())
+                continue
+
             # TODO: These 2 cases have different behavior which might be confusing to the user.
             # "<failed_address>|<failed_port>|<failed_data_dir> <failed_address>|<failed_port>|<failed_data_dir>" does full recovery
             # "<failed_address>|<failed_port>|<failed_data_dir>" does incremental recovery
             failover = None
             if req.failover_host:
-
                 # these two lines make it so that failover points to the object that is registered in gparray
                 #   as the failed segment(!).
                 failover = req.failed
@@ -159,23 +199,28 @@ class RecoveryTriplets(abc.ABC):
                 failover.setSegmentHostName(req.failover_host)
                 failover.setSegmentPort(int(req.failover_port))
                 failover.setSegmentDataDirectory(req.failover_datadir)
-                failover.unreachable = False if req.failover_to_new_host else failover.unreachable
-
-            # this must come AFTER the if check above because failedSegment can be adjusted to
-            #   point to a different object
-            if req.failed.unreachable and not req.failover_to_new_host:
-                continue
+                failover.unreachable = failover.getSegmentHostName() in unreachable_failover_hosts
+            else:
+                # recovery in place, check for host reachable
+                if(req.failed.unreachable):
+                    # skip the recovery
+                    continue
 
             peer = dbIdToPeerMap.get(req.failed.getSegmentDbId())
 
             triplets.append(RecoveryTriplet(req.failed, peer, failover))
 
+        if len(failed_segments_with_running_basebackup) > 0:
+            logger.warning(
+                "Found pg_basebackup running for segments with contentIds %s, skipping recovery of these segments" % (
+                    failed_segments_with_running_basebackup))
+
         return triplets
 
 
 class RecoveryTripletsInplace(RecoveryTriplets):
-    def __init__(self, gpArray):
-        super().__init__(gpArray)
+    def __init__(self, gpArray, paralleldegree):
+        super().__init__(gpArray, paralleldegree)
 
     def getTriplets(self):
         requests = []
@@ -191,8 +236,8 @@ class RecoveryTripletsInplace(RecoveryTriplets):
 
 
 class RecoveryTripletsNewHosts(RecoveryTriplets):
-    def __init__(self, gpArray, newHosts):
-        super().__init__(gpArray)
+    def __init__(self, gpArray, newHosts, paralleldegree):
+        super().__init__(gpArray, paralleldegree)
         self.newHosts = [] if not newHosts else newHosts[:]
         self.portAssigner = self._PortAssigner(gpArray)
 
@@ -276,8 +321,8 @@ class RecoveryTripletsNewHosts(RecoveryTriplets):
 
 
 class RecoveryTripletsUserConfigFile(RecoveryTriplets):
-    def __init__(self, gpArray, config_file):
-        super().__init__(gpArray)
+    def __init__(self, gpArray, config_file, paralleldegree):
+        super().__init__(gpArray, paralleldegree)
         self.config_file = config_file
         self.rows = self._parseConfigFile(self.config_file)
 

@@ -407,11 +407,6 @@ private:
 						  CDistributionSpecArray *pdrgpdsBaseTables,
 						  ULONG *pulNonGatherMotions, BOOL *pfDML);
 
-	// translate a row trigger operator
-	CDXLNode *PdxlnRowTrigger(CExpression *pexpr, CColRefArray *colref_array,
-							  CDistributionSpecArray *pdrgpdsBaseTables,
-							  ULONG *pulNonGatherMotions, BOOL *pfDML);
-
 	// translate a scalar If statement
 	CDXLNode *PdxlnScIfStmt(CExpression *pexprScIf);
 
@@ -535,16 +530,6 @@ private:
 									const CColRefArray *part_colrefs,
 									const CColRefArray *root_colrefs,
 									CExpression *pred);
-
-	CDXLNode *PdxlnBitmapIndexProbeForChildPart(
-		const ColRefToUlongMap *root_col_mapping,
-		const CColRefArray *part_colrefs, const CColRefArray *root_colrefs,
-		const IMDRelation *part, CExpression *pexprBitmapIndexProbe);
-
-	CDXLNode *PdxlnBitmapIndexPathForChildPart(
-		const ColRefToUlongMap *root_col_mapping,
-		const CColRefArray *part_colrefs, const CColRefArray *root_colrefs,
-		const IMDRelation *part, CExpression *pexprBitmapIndexPath);
 
 	// translate a project list expression into a DXL proj list node
 	// according to the order specified in the dynamic array

@@ -44,6 +44,7 @@ This is an example file. Note that all XML elements, names, and attributes are c
         <command>/clientdir/rclient.sh</command>
         <shared_directory access="ro" container="/clientdir" host="/usr/local/greenplum-db/bin/plcontainer_clients"/>
         <setting use_container_logging="yes"/>
+        <setting enable_network="no"/>
         <setting roles="gpadmin,user1"/>
     </runtime>
     <runtime>
@@ -137,7 +138,10 @@ settings
     :   Optional. The value is a Greenplum Database role name or a comma-separated list of roles. PL/Container runs a container that uses the PL/Container runtime configuration only for the listed roles. If the attribute is not specified, any Greenplum Database role can run an instance of this container runtime configuration. For example, you create a UDF that specifies the `plcontainer` language and identifies a `# container:` runtime configuration that has the `roles` attribute set. When a role \(user\) runs the UDF, PL/Container checks the list of roles and runs the container only if the role is on the list.
 
     use\_container\_logging="\{yes \| no\}"
-    :   Optional. Enables or disables Docker logging for the container. The attribute value `yes` enables logging. The attribute value `no` disables logging \(the default\).
+    :   Optional.  Activates or deactivates  Docker logging for the container. The attribute value `yes` enables logging. The attribute value `no` deactivates logging \(the default\).
+
+    enable\_network="\{yes \| no\}"
+    :   Optional. Available starting with PL/Container version 2.2, this attribute activates or deactivates network access for the UDF container. The attribute value `yes` enables UDFs to access the network. The attribute value `no` deactivates network access \(the default\).
 
     The Greenplum Database server configuration parameter [log\_min\_messages](../../ref_guide/config_params/guc-list.html) controls the PL/Container log level. The default log level is `warning`. For information about PL/Container log information, see [Notes](../../analytics/pl_container_using.html).
 

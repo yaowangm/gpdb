@@ -22,6 +22,7 @@
 #include "gpopt/operators/CScalarArrayCmp.h"
 #include "gpopt/operators/CScalarBoolOp.h"
 #include "gpopt/operators/CScalarConst.h"
+#include "gpopt/operators/CScalarProjectElement.h"
 #include "gpopt/xforms/CXform.h"
 
 // fwd declarations
@@ -358,6 +359,11 @@ public:
 	// check if the aggregate is local or global
 	static BOOL FHasGlobalAggFunc(const CExpression *pexprProjList);
 
+	// check if given project list has only aggregate functions
+	// that can be safely executed on replicated slices
+	static BOOL FContainsOnlyReplicationSafeAggFuncs(
+		const CExpression *pexprProjList);
+
 	// generate a bool expression
 	static CExpression *PexprScalarConstBool(CMemoryPool *mp, BOOL value,
 											 BOOL is_null = false);
@@ -687,11 +693,27 @@ public:
 	// returns if the scalar array has all constant elements or children
 	static BOOL FScalarConstArray(CExpression *pexpr);
 
+	// returns if the scalar constant is an array
+	static BOOL FIsConstArray(CExpression *pexpr);
+
+	// returns MDId for gp_percentile based on return type
+	static CMDIdGPDB *GetPercentileAggMDId(CMemoryPool *mp,
+										   CExpression *pexprAggFn);
+
 	// returns if the scalar constant array has already been collapased
 	static BOOL FScalarArrayCollapsed(CExpression *pexprArray);
 
 	// returns true if the subquery is a ScalarSubqueryAny
 	static BOOL FAnySubquery(COperator *pop);
+
+	// returns true if the subquery is a ScalarSubqueryExists
+	static BOOL FExistsSubquery(COperator *pop);
+
+	// returns true if the expression is a correlated EXISTS/ANY subquery
+	static BOOL FCorrelatedExistsAnySubquery(CExpression *pexpr);
+
+	static CScalarProjectElement *PNthProjectElement(CExpression *pexpr,
+													 ULONG ul);
 
 	// returns the expression under the Nth project element of a CLogicalProject
 	static CExpression *PNthProjectElementExpr(CExpression *pexpr, ULONG ul);
@@ -930,11 +952,11 @@ public:
 	static CExpression *PexprLimit(CMemoryPool *mp, CExpression *pexpr,
 								   ULONG ulOffSet, ULONG count);
 
-	// generate part oid
-	static BOOL FGeneratePartOid(IMDId *mdid);
-
 	// return true if given expression contains window aggregate function
 	static BOOL FHasAggWindowFunc(CExpression *pexpr);
+
+	// return true if given expression contains ordered aggregate function
+	static BOOL FHasOrderedAggToSplit(CExpression *pexpr);
 
 	// return true if the given expression is a cross join
 	static BOOL FCrossJoin(CExpression *pexpr);

@@ -9,10 +9,8 @@
 -- out the differences in "(xx rows)" lines that happens if there is
 -- no Settings line at all. The expected output does include some Settings.
 -- To make those "(xx rows)" lines stable, set a GUC. Doesn't matter which
--- one, as long as it's printed in the Settings lines. The value doesn't
--- matter either, so use the default value, making it a no-op except for
--- the printing of the Settings lines.
-set seq_page_cost=1;
+-- one, as long as it's printed in the Settings lines.
+set seq_page_cost=1.001;
 
 -- end_ignore
 

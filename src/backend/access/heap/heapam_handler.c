@@ -237,6 +237,21 @@ heapam_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 	return res;
 }
 
+/*
+ * ------------------------------------------------------------------------
+ * GPDB: DML state manipulation functions (not implemented by heap AM)
+ * ------------------------------------------------------------------------
+ */
+
+static inline void
+heap_dml_init(Relation relation)
+{
+}
+
+static inline void
+heap_dml_finish(Relation relation)
+{
+}
 
 /* ----------------------------------------------------------------------------
  *  Functions for manipulations of physical tuples for heap AM.
@@ -635,7 +650,7 @@ heapam_relation_set_new_filenode(Relation rel,
 			   rel->rd_rel->relkind == RELKIND_AOVISIMAP ||
 			   rel->rd_rel->relkind == RELKIND_AOBLOCKDIR);
 		smgrcreate(srel, INIT_FORKNUM, false);
-		log_smgrcreate(newrnode, INIT_FORKNUM);
+		log_smgrcreate(newrnode, INIT_FORKNUM, SMGR_MD);
 		smgrimmedsync(srel, INIT_FORKNUM);
 	}
 
@@ -692,7 +707,7 @@ heapam_relation_copy_data(Relation rel, const RelFileNode *newrnode)
 			if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
 				(rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED &&
 				 forkNum == INIT_FORKNUM))
-				log_smgrcreate(newrnode, forkNum);
+				log_smgrcreate(newrnode, forkNum, SMGR_MD);
 			RelationCopyStorage(rel->rd_smgr, dstrel, forkNum,
 								rel->rd_rel->relpersistence);
 		}
@@ -2631,6 +2646,9 @@ static const TableAmRoutine heapam_methods = {
 	.parallelscan_estimate = table_block_parallelscan_estimate,
 	.parallelscan_initialize = table_block_parallelscan_initialize,
 	.parallelscan_reinitialize = table_block_parallelscan_reinitialize,
+
+	.dml_init = heap_dml_init,
+	.dml_finish = heap_dml_finish,
 
 	.index_fetch_begin = heapam_index_fetch_begin,
 	.index_fetch_reset = heapam_index_fetch_reset,

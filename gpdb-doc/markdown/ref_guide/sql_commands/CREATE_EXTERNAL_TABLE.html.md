@@ -231,7 +231,7 @@ FORMAT 'text' (delimiter ',' null '\'\'\'\'' )
 ```
 
 ESCAPE
-:   Specifies the single character that is used for C escape sequences \(such as `\n`,`\t`,`\100`, and so on\) and for escaping data characters that might otherwise be taken as row or column delimiters. Make sure to choose an escape character that is not used anywhere in your actual column data. The default escape character is a \\ \(backslash\) for text-formatted files and a `"` \(double quote\) for csv-formatted files, however it is possible to specify another character to represent an escape. It is also possible to disable escaping in text-formatted files by specifying the value `'OFF'` as the escape value. This is very useful for data such as text-formatted web log data that has many embedded backslashes that are not intended to be escapes.
+:   Specifies the single character that is used for C escape sequences \(such as `\n`,`\t`,`\100`, and so on\) and for escaping data characters that might otherwise be taken as row or column delimiters. Make sure to choose an escape character that is not used anywhere in your actual column data. The default escape character is a \\ \(backslash\) for text-formatted files and a `"` \(double quote\) for csv-formatted files, however it is possible to specify another character to represent an escape. It is also possible to deactivate escaping in text-formatted files by specifying the value `'OFF'` as the escape value. This is very useful for data such as text-formatted web log data that has many embedded backslashes that are not intended to be escapes.
 
 NEWLINE
 :   Specifies the newline used in your data files – `LF` \(Line feed, 0x0A\), `CR` \(Carriage return, 0x0D\), or `CRLF` \(Carriage return plus line feed, 0x0D 0x0A\). If not specified, a Greenplum Database segment will detect the newline type by looking at the first row of data it receives and using the first newline type encountered.
@@ -259,7 +259,7 @@ OPTIONS key 'value'\[, key' value' ...\]
 :   Optional. Specifies parameters and values as key-value pairs that are set to a custom data access protocol when the protocol is used as a external table protocol for an external table. It is the responsibility of the custom data access protocol to process and validate the key-value pairs.
 
 ENCODING 'encoding'
-:   Character set encoding to use for the external table. Specify a string constant \(such as `'SQL_ASCII'`\), an integer encoding number, or `DEFAULT` to use the default client encoding. See [Character Set Support](../character_sets.html).
+:   Character set encoding to use for the external table. Specify a string constant \(such as `'SQL_ASCII'`\), an integer encoding number, or `DEFAULT` to use the default server encoding. See [Character Set Support](../character_sets.html).
 
 LOG ERRORS \[PERSISTENTLY\]
 :   This is an optional clause that can precede a `SEGMENT REJECT LIMIT` clause to log information about rows with formatting errors. The error log data is stored internally. If error log data exists for a specified external table, new data is appended to existing error log data. The error log data is not replicated to mirror segments.

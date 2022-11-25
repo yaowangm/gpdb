@@ -23,8 +23,7 @@ ALTER TABLE [IF EXISTS] <name>
 ALTER TABLE ALL IN TABLESPACE <name> [ OWNED BY <role_name> [, ... ] ]
     SET TABLESPACE <new_tablespace> [ NOWAIT ]
 
-ALTER TABLE [IF EXISTS] [ONLY] <name> SET 
-     WITH (REORGANIZE=true|false)
+ALTER TABLE [IF EXISTS] [ONLY] <name>
    | DISTRIBUTED BY ({<column_name> [<opclass>]} [, ... ] )
    | DISTRIBUTED RANDOMLY
    | DISTRIBUTED REPLICATED 
@@ -38,7 +37,7 @@ where <action> is one of:
   ADD [COLUMN] <column_name data_type> [ DEFAULT <default_expr> ]
       [<column_constraint> [ ... ]]
       [ COLLATE <collation> ]
-      [ ENCODING ( <storage_parameter> [,...] ) ]
+      [ ENCODING ( <storage_directive [,...] ) ]
   DROP [COLUMN] [IF EXISTS] <column_name> [RESTRICT | CASCADE]
   ALTER [COLUMN] <column_name> [ SET DATA ] TYPE <type> [COLLATE <collation>] [USING <expression>]
   ALTER [COLUMN] <column_name> SET DEFAULT <expression>
@@ -47,6 +46,7 @@ where <action> is one of:
   ALTER [COLUMN] <column_name> SET STATISTICS <integer>
   ALTER [COLUMN] column SET ( <attribute_option> = <value> [, ... ] )
   ALTER [COLUMN] column RESET ( <attribute_option> [, ... ] )
+  ALTER [COLUMN] column SET ENCODNG ( storage_directive [, ...] )
   ADD <table_constraint> [NOT VALID]
   ADD <table_constraint_using_index>
   VALIDATE CONSTRAINT <constraint_name>
@@ -56,8 +56,10 @@ where <action> is one of:
   CLUSTER ON <index_name>
   SET WITHOUT CLUSTER
   SET WITHOUT OIDS
+  SET ACCESS METHOD <access_method>
   SET (<storage_parameter> = <value>)
   RESET (<storage_parameter> [, ... ])
+  SET  WITH (<storage_parameter> = <value>)
   INHERIT <parent_table>
   NO INHERIT <parent_table>
   OF `type_name`
@@ -140,17 +142,42 @@ and subpartition\_element is:
 [ TABLESPACE <tablespace> ]
 ```
 
-where storage\_parameter is:
+where storage_directive is:
 
 ```
-   appendoptimized={TRUE|FALSE}
-   blocksize={8192-2097152}
-   orientation={COLUMN|ROW}
-   compresstype={ZLIB|ZSTD|QUICKLZ|RLE_TYPE|NONE}
-   compresslevel={0-9}
-   fillfactor={10-100}
-   [oids=FALSE]
+   blocksize={8192-2097152}
+   compresstype={ZLIB|ZSTD|QUICKLZ|RLE_TYPE|NONE}
+   compresslevel={0-9}
+``` 
+
+where storage\_parameter when used with the `SET` command is:
+
 ```
+   blocksize={8192-2097152}
+   compresstype={ZLIB|ZSTD|QUICKLZ|RLE_TYPE|NONE}
+   compresslevel={0-9}
+   fillfactor={10-100}
+   checksum= {true | false }
+   analyze_hll_non_part_table={true | false }
+```
+
+where storage\_parameter when used with the `SET WITH` command is:
+
+```
+   appendoptimized={true | false }
+   blocksize={8192-2097152}
+   orientation={COLUMN|ROW}
+   compresstype={ZLIB|ZSTD|QUICKLZ|RLE_TYPE|NONE}
+   compresslevel={0-9}
+   fillfactor={10-100}
+   checksum={true | false }
+   reorganize={true | false }
+```
+
+  <p class="note">
+<strong>Note:</strong>
+Although you can specify the table's access method using the <code>appendoptimized</code> storage parameter, VMware recommends that you use <code>SET ACCESS METHOD &lt;access method></code> instead.
+</p>
 
 ## <a id="section3"></a>Description 
 
@@ -194,7 +221,7 @@ where storage\_parameter is:
     After this command is run, the index is "owned" by the constraint, in the same way as if the index had been built by a regular `ADD PRIMARY KEY` or `ADD UNIQUE` command. In particular, dropping the constraint will make the index disappear too.
 
 -   **DROP CONSTRAINT \[IF EXISTS\]** — Drops the specified constraint on a table. If `IF EXISTS` is specified and the constraint does not exist, no error is thrown. In this case a notice is issued instead.
--   **DISABLE/ENABLE TRIGGER** — Disables or enables trigger\(s\) belonging to the table. A disabled trigger is still known to the system, but is not run when its triggering event occurs. For a deferred trigger, the enable status is checked when the event occurs, not when the trigger function is actually run. One may disable or enable a single trigger specified by name, or all triggers on the table, or only user-created triggers. Disabling or enabling constraint triggers requires superuser privileges.
+-   **DISABLE/ENABLE TRIGGER** — Deactivates or activates trigger\(s\) belonging to the table. A deactivated trigger is still known to the system, but is not run when its triggering event occurs. For a deferred trigger, the enable status is checked when the event occurs, not when the trigger function is actually run. One may deactivate or activate a single trigger specified by name, or all triggers on the table, or only user-created triggers. Deactivating or activating constraint triggers requires superuser privileges.
 
     **Note:** triggers are not supported in Greenplum Database. Triggers in general have very limited functionality due to the parallelism of Greenplum Database.
 
@@ -226,6 +253,14 @@ You must own the table to use `ALTER TABLE`. To change the schema or tablespace 
 **Note:** Memory usage increases significantly when a table has many partitions, if a table has compression, or if the blocksize for a table is large. If the number of relations associated with the table is large, this condition can force an operation on the table to use more memory. For example, if the table is a CO table and has a large number of columns, each column is a relation. An operation like `ALTER TABLE ALTER COLUMN` opens all the columns in the table allocates associated buffers. If a CO table has 40 columns and 100 partitions, and the columns are compressed and the blocksize is 2 MB \(with a system factor of 3\), the system attempts to allocate 24 GB, that is \(40 ×100\) × \(2 ×3\) MB or 24 GB.
 
 ## <a id="section4"></a>Parameters 
+
+access method
+:   The method to use for accessing the table. Set to `heap` to access the table as a heap-storage table, `ao_row` to access the table as an append-optimized table with row-oriented storage (AO), or `ao_column` to access the table as an append-optimized table with column-oriented storage (AOCO).
+
+  <p class="note">
+<strong>Note:</strong>
+Although you can specify the table's access method using <code>SET &lt;storage_parameter></code>, VMware recommends that you use <code>SET ACCESS METHOD &lt;access_method></code> instead.
+</p>
 
 ONLY
 :   Only perform the operation on the table name specified. If the `ONLY` keyword is not used, the operation will be performed on the named table and any child table partitions associated with that table.
@@ -262,13 +297,13 @@ RESTRICT
 :   Refuse to drop the column or constraint if there are any dependent objects. This is the default behavior.
 
 trigger\_name
-:   Name of a single trigger to disable or enable. Note that Greenplum Database does not support triggers.
+:   Name of a single trigger to deactivate or enable. Note that Greenplum Database does not support triggers.
 
 ALL
-:   Disable or enable all triggers belonging to the table including constraint related triggers. This requires superuser privilege if any of the triggers are internally generated constraint triggers such as those that are used to implement foreign key constraints or deferrable uniqueness and exclusion constraints.
+:   Deactivate or activate all triggers belonging to the table including constraint related triggers. This requires superuser privilege if any of the triggers are internally generated constraint triggers such as those that are used to implement foreign key constraints or deferrable uniqueness and exclusion constraints.
 
 USER
-:   Disable or enable all triggers belonging to the table except for internally generated constraint triggers such as those that are used to implement foreign key constraints or deferrable uniqueness and exclusion constraints.
+:   Deactivate or activate all triggers belonging to the table except for internally generated constraint triggers such as those that are used to implement foreign key constraints or deferrable uniqueness and exclusion constraints.
 
 index\_name
 :   The index name on which the table should be marked for clustering. Note that `CLUSTER` is not the recommended way to physically reorder a table in Greenplum Database because it takes so long. It is better to recreate the table with [CREATE TABLE AS](CREATE_TABLE_AS.html) and order it by the index column\(s\).
@@ -280,12 +315,15 @@ value
 :   The new value for the `FILLFACTOR` parameter, which is a percentage between 10 and 100. 100 is the default.
 
 DISTRIBUTED BY \(\{column\_name \[opclass\]\}\) \| DISTRIBUTED RANDOMLY \| DISTRIBUTED REPLICATED
-:   Specifies the distribution policy for a table. Changing a hash distribution policy causes the table data to be physically redistributed, which can be resource intensive. If you declare the same hash distribution policy or change from hash to random distribution, data will not be redistributed unless you declare `SET WITH (REORGANIZE=true)`.
+:   Specifies the distribution policy for a table. Changing a hash distribution policy causes the table data to be physically redistributed, which can be resource intensive. If you declare the same hash distribution policy or change from hash to random distribution, data will not be redistributed unless you declare `SET WITH (reorganize=true)`.
 
 :   Changing to or from a replicated distribution policy causes the table data to be redistributed.
 
-REORGANIZE=true\|false
-:   Use `REORGANIZE=true` when the hash distribution policy has not changed or when you have changed from a hash to a random distribution, and you want to redistribute the data anyways.
+analyze_hll_non_part_table=true|false
+:   Use `analyze_hll_non_part_table=true` to force collection of HLL statistics even if the table is not part of a partitioned table. The default is `false`.
+
+reorganize=true\|false
+:   Use `reorganize=true` when the hash distribution policy has not changed or when you have changed from a hash to a random distribution, and you want to redistribute the data anyway.
 
 parent\_table
 :   A parent table to associate or de-associate with this table.
@@ -401,6 +439,7 @@ This table lists the `ALTER TABLE` operations that require a table rewrite when 
 |----------------------|---------------------------------|----------------|----|
 |`ALTER COLUMN TYPE`|Yes|Yes|Yes|
 |`ADD COLUMN`|No|Yes|Yes|
+| `ALTER COLUMN SET ENCODING`|Yes|N/A|N/A|
 
 **Note:** Dropping a system `oid` column also requires a table rewrite.
 

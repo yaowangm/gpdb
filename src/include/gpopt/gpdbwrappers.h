@@ -27,15 +27,15 @@ extern "C" {
 #include "gpos/types.h"
 
 // fwd declarations
-typedef struct SysScanDescData *SysScanDesc;
+using SysScanDesc = struct SysScanDescData *;
 struct TypeCacheEntry;
-typedef struct NumericData *Numeric;
-typedef struct HeapTupleData *HeapTuple;
-typedef struct RelationData *Relation;
+using Numeric = struct NumericData *;
+using HeapTuple = struct HeapTupleData *;
+using Relation = struct RelationData *;
 struct Value;
-typedef struct TupleDescData *TupleDesc;
+using TupleDesc = struct TupleDescData *;
 struct Query;
-typedef struct ScanKeyData *ScanKey;
+using ScanKey = struct ScanKeyData *;
 struct Bitmapset;
 struct Plan;
 struct ListCell;
@@ -46,7 +46,7 @@ struct ForeignScan;
 struct Uri;
 struct CdbComponentDatabases;
 struct StringInfoData;
-typedef StringInfoData *StringInfo;
+using StringInfo = StringInfoData *;
 struct LogicalIndexes;
 struct ParseState;
 struct DefElem;
@@ -226,27 +226,6 @@ char FuncDataAccess(Oid funcid);
 // exec location property of given function
 char FuncExecLocation(Oid funcid);
 
-// trigger name
-char *GetTriggerName(Oid triggerid);
-
-// trigger relid
-Oid GetTriggerRelid(Oid triggerid);
-
-// trigger funcid
-Oid GetTriggerFuncid(Oid triggerid);
-
-// trigger type
-int32 GetTriggerType(Oid triggerid);
-
-// is trigger enabled
-bool IsTriggerEnabled(Oid triggerid);
-
-// does trigger exist
-bool TriggerExists(Oid oid);
-
-// does check constraint exist
-bool CheckConstraintExists(Oid check_constraint_oid);
-
 // check constraint name
 char *GetCheckConstraintName(Oid check_constraint_oid);
 
@@ -308,27 +287,6 @@ RegProcedure GetOpFunc(Oid opno);
 // operator name
 char *GetOpName(Oid opno);
 
-#if 0
-	// parts of a partitioned table
-	bool IsLeafPartition(Oid oid);
-
-	// partition table has an external partition
-	bool HasExternalPartition(Oid oid);
-
-	// find the oid of the root partition given partition oid belongs to
-	Oid GetRootPartition(Oid oid);
-	
-	// partition attributes
-	List *GetPartitionAttrs(Oid oid);
-
-	// get partition keys and kinds ordered by partition level
-	void GetOrderedPartKeysAndKinds(Oid oid, List **pkeys, List **pkinds);
-
-	/* GPDB_12_MERGE_FIXME: mergings stats not yet implemented with new partitioning implementation */
-	// parts of a partitioned table
-	//PartitionNode *GetParts(Oid relid, int16 level, Oid parent, bool inctemplate, bool includesubparts);
-#endif
-
 // keys of the relation with the given oid
 List *GetRelationKeys(Oid relid);
 
@@ -346,9 +304,6 @@ bool HeapAttIsNull(HeapTuple tup, int attnum);
 
 // free heap tuple
 void FreeHeapTuple(HeapTuple htup);
-
-// does an index exist with the given oid
-bool IndexExists(Oid oid);
 
 // get the default hash opclass for type
 Oid GetDefaultDistributionOpclassForType(Oid typid);
@@ -421,14 +376,6 @@ void ListFree(List *list);
 
 // deep free of a list
 void ListFreeDeep(List *list);
-
-#if 0
-	// does a partition table have an appendonly child
-	bool IsAppendOnlyPartitionTable(Oid root_oid);
-
-	// does a multi-level partitioned table have uniform partitioning hierarchy
-	bool IsMultilevelPartitionUniform(Oid root_oid);
-#endif
 
 // lookup type cache
 TypeCacheEntry *LookupTypeCache(Oid type_id, int flags);
@@ -513,9 +460,6 @@ bool IsOpNDVPreserving(Oid opno);
 // get input types for a given operator
 void GetOpInputTypes(Oid opno, Oid *lefttype, Oid *righttype);
 
-// does an operator exist with the given oid
-bool OperatorExists(Oid oid);
-
 // expression tree walker
 bool WalkExpressionTree(Node *node, bool (*walker)(), void *context);
 
@@ -534,20 +478,9 @@ Node *MutateExpressionTree(Node *node, Node *(*mutator)(), void *context);
 Node *MutateQueryOrExpressionTree(Node *node, Node *(*mutator)(), void *context,
 								  int flags);
 
-#if 0
-	// check whether the part with the given oid is the root of a partition table
-	bool RelPartIsRoot(Oid relid);
-	
-	// check whether the part with the given oid is an interior subpartition
-	bool RelPartIsInterior(Oid relid);
-#endif
-
 bool RelIsPartitioned(Oid relid);
 
 bool IndexIsPartitioned(Oid relid);
-
-// check whether table with the given oid is a regular table and not part of a partitioned table
-bool RelPartIsNone(Oid relid);
 
 // check whether a relation is inherited
 bool HasSubclassSlow(Oid rel_oid);
@@ -568,9 +501,6 @@ gpos::BOOL IsChildPartDistributionMismatched(Relation rel);
     // have a trigger of the given type
     gpos::BOOL ChildPartHasTriggers(Oid oid, int trigger_type);
 #endif
-
-// does a relation exist with the given oid
-bool RelationExists(Oid oid);
 
 // estimate the relation size using the real number of blocks and tuple density
 void CdbEstimateRelationSize(RelOptInfo *relOptInfo, Relation rel,
@@ -607,9 +537,6 @@ List *FindMatchingMembersInTargetList(Node *node, List *targetlist);
 
 // check if two gpdb objects are equal
 bool Equals(void *p1, void *p2);
-
-// does a type exist with the given oid
-bool TypeExists(Oid oid);
 
 // check whether a type is composite
 bool IsCompositeType(Oid typid);
@@ -686,9 +613,6 @@ List *GetMergeJoinOpFamilies(Oid opno);
 // and takes ownership of the result
 Expr *EvaluateExpr(Expr *expr, Oid result_type, int32 typmod);
 
-// interpret the value of "With oids" option from a list of defelems
-bool InterpretOidsOption(List *options, bool allowOids);
-
 // extract string value from defelem's value
 char *DefGetString(DefElem *defelem);
 
@@ -698,19 +622,9 @@ Expr *TransformArrayConstToArrayExpr(Const *constant);
 // transform array Const to an ArrayExpr
 Node *EvalConstExpressions(Node *node);
 
-#if 0
-	// static partition selection given a PartitionSelector node
-	SelectedParts *RunStaticPartitionSelection(PartitionSelector *ps);
-#endif
-
 #ifdef FAULT_INJECTOR
 // simple fault injector used by COptTasks.cpp to inject GPDB fault
 FaultInjectorType_e InjectFaultInOptTasks(const char *fault_name);
-#endif
-
-#if 0
-	// return the number of leaf partition for a given table oid
-	gpos::ULONG CountLeafPartTables(Oid oidRelation);
 #endif
 
 // Does the metadata cache need to be reset (because of a catalog

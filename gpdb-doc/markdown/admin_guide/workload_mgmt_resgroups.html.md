@@ -2,11 +2,13 @@
 title: Using Resource Groups 
 ---
 
-You use resource groups to set and enforce CPU, memory, and concurrent transaction limits in Greenplum Database. After you define a resource group, you can then assign the group to one or more Greenplum Database roles, or to an external component such as PL/Container, in order to control the resources used by those roles or components.
+You use resource groups to set and enforce CPU, memory, and concurrent transaction limits in Greenplum Database. After you define a resource group, you can then assign the group to one or more Greenplum Database roles, or to an external component such as PL/Container, in order to control the resources used by those roles or components. 
 
 When you assign a resource group to a role \(a role-based resource group\), the resource limits that you define for the group apply to all of the roles to which you assign the group. For example, the memory limit for a resource group identifies the maximum memory usage for all running transactions submitted by Greenplum Database users in all roles to which you assign the group.
 
 Similarly, when you assign a resource group to an external component, the group limits apply to all running instances of the component. For example, if you create a resource group for a PL/Container external component, the memory limit that you define for the group specifies the maximum memory usage for all running instances of each PL/Container runtime to which you assign the group.
+
+When using resource groups to control resources like CPU cores, review the Hyperthreading note in [Hardware and Network](../install_guide/platform-requirements.html#topic_tnl_3mx_zgb).
 
 This topic includes the following subtopics:
 
@@ -42,7 +44,7 @@ Within a resource group for roles, transactions are evaluated on a first in, fir
 
 You can also use resource groups to manage the CPU and memory resources of external components such as PL/Container. Resource groups for external components use Linux cgroups to manage both the total CPU and total memory resources for the component.
 
-**Note:** Containerized deployments of Greenplum Database, such as Greenplum for Kubernetes, might create a hierarchical set of nested cgroups to manage host system resources. The nesting of cgroups affects the Greenplum Database resource group limits for CPU percentage, CPU cores, and memory \(except for Greenplum Database external components\). The Greenplum Database resource group system resource limit is based on the quota for the parent group.
+**Note:** Containerized deployments of Greenplum Database might create a hierarchical set of nested cgroups to manage host system resources. The nesting of cgroups affects the Greenplum Database resource group limits for CPU percentage, CPU cores, and memory \(except for Greenplum Database external components\). The Greenplum Database resource group system resource limit is based on the quota for the parent group.
 
 For example, Greenplum Database is running in a cgroup demo, and the Greenplum Database cgroup is nested in the cgroup demo. If the cgroup demo is configured with a CPU limit of 60% of system CPU resources and the Greenplum Database resource group CPU limit is set 90%, the Greenplum Database limit of host system CPU resources is 54% \(0.6 x 0.9\).
 
@@ -134,7 +136,7 @@ When you assign CPU cores to `CPUSET` groups, consider the following:
 
 Resource groups that you configure with `CPUSET` have a higher priority on CPU resources. The maximum CPU resource usage percentage for all resource groups configured with `CPUSET` on a segment host is the number of CPU cores reserved divided by the number of all CPU cores, multiplied by 100.
 
-When you configure `CPUSET` for a resource group, Greenplum Database disables `CPU_RATE_LIMIT` for the group and sets the value to -1.
+When you configure `CPUSET` for a resource group, Greenplum Database deactivates `CPU_RATE_LIMIT` for the group and sets the value to -1.
 
 **Note:** You must configure `CPUSET` for a resource group *after* you have enabled resource group-based resource management for your Greenplum Database cluster.
 
@@ -151,7 +153,7 @@ The maximum CPU resource usage for all resource groups configured with a `CPU_RA
 -   The number of non-reserved CPU cores divided by the number of all CPU cores, multiplied by 100, and
 -   The `gp_resource_group_cpu_limit` value.
 
-When you configure `CPU_RATE_LIMIT` for a resource group, Greenplum Database disables `CPUSET` for the group and sets the value to -1.
+When you configure `CPU_RATE_LIMIT` for a resource group, Greenplum Database deactivates `CPUSET` for the group and sets the value to -1.
 
 There are two different ways of assigning CPU resources by percentage, determined by the value of the configuration parameter `gp_resource_group_cpu_ceiling_enforcement`:
 
@@ -188,7 +190,7 @@ The minimum `MEMORY_SHARED_QUOTA` that you can specify is 0, the maximum is 100.
 
 As mentioned previously, `CONCURRENCY` identifies the maximum number of concurrently running transactions permitted in a resource group for roles. If fixed memory is reserved by a resource group \(non-zero `MEMORY_LIMIT`\), it is divided into `CONCURRENCY` number of transaction slots. Each slot is allocated a fixed, equal amount of the resource group memory. Greenplum Database guarantees this fixed memory to each transaction.
 
-![](graphics/resgroupmem.png "Resource Group Memory Allotments")
+![Resource Group Memory Allotments](graphics/resgroupmem.png "Resource Group Memory Allotments")
 
 When a query's memory usage exceeds the fixed per-transaction memory usage amount, Greenplum Database allocates available resource group shared memory to the query. The maximum amount of resource group memory available to a specific transaction slot is the sum of the transaction's fixed memory and the full resource group shared memory allotment.
 
@@ -223,6 +225,20 @@ When `MEMORY_SPILL_RATIO` is 0, Greenplum Database uses the [`statement_mem`](..
 **Note:** When you set `MEMORY_LIMIT` to 0, `MEMORY_SPILL_RATIO` must also be set to 0.
 
 You can selectively set the `MEMORY_SPILL_RATIO` on a per-query basis at the session level with the [memory\_spill\_ratio](../ref_guide/config_params/guc-list.html) server configuration parameter.
+
+##### <a id="topic833maxalloc"></a>About How Greenplum Database Allocates Transaction Memory
+
+The query planner pre-computes the maximum amount of memory that each node in the plan tree can use. When resource group-based resource management is active and the `MEMORY_SPILL_RATIO` for the resource group is non-zero, the following formula roughly specifies the maximum amount of memory that Greenplum Database allocates to a transaction:
+
+``` pre
+query_mem = (rg_perseg_mem * memory_limit) * memory_spill_ratio / concurrency
+```
+
+Where `memory_limit`, `memory_spill_ratio`, and `concurrency` are specified by the resource group under which the transaction runs.
+
+By default, Greenplum Database recalculates the maximum amount of segment host memory allocated to a transaction based on the `rg_perseg_mem` and the number of primary segments on the *segment host*.
+
+If you prefer that the maximum per-transaction memory calculation be based on the `rg_perseg_mem` and the number of primary segments on the *coordinator host*, set the [gp_resource_group_enable_recalculate_query_mem](../ref_guide/config_params/guc-list.html#gp_resource_group_enable_recalculate_query_mem) server configuration parameter to `false`.
 
 ##### <a id="topic833low"></a>memory\_spill\_ratio and Low Memory Queries 
 
@@ -270,13 +286,25 @@ For detailed information about cgroups, refer to the Control Groups documentatio
 
 Complete the following tasks on each node in your Greenplum Database cluster to set up cgroups for use with resource groups:
 
-1.  Create the Greenplum Database cgroups configuration file `/etc/cgconfig.d/gpdb.conf`. You must be the superuser or have `sudo` access to create this file:
+1.  If not already installed, install the Control Groups operating system package on each Greenplum Database node. The command that you run to perform this task will differ based on the operating system installed on the node. You must be the superuser or have `sudo` access to run the command:
+    -   Redhat/CentOS 7.x/8.x systems:
+
+        ```
+        sudo yum install libcgroup-tools
+        ```
+    -   Redhat/CentOS 6.x systems:
+
+        ```
+        sudo yum install libcgroup
+        ```
+
+1.  Locate the cgroups configuration file `/etc/cgconfig.conf`. You must be the superuser or have `sudo` access to edit this file:
 
     ```
-    sudo vi /etc/cgconfig.d/gpdb.conf
+    sudo vi /etc/cgconfig.conf
     ```
 
-2.  Add the following configuration information to `/etc/cgconfig.d/gpdb.conf`:
+2.  Add the following configuration information to the file:
 
     ```
     group gpdb {
@@ -303,17 +331,15 @@ Complete the following tasks on each node in your Greenplum Database cluster to 
 
     This content configures CPU, CPU accounting, CPU core set, and memory control groups managed by the `gpadmin` user. Greenplum Database uses the memory control group only for those resource groups created with the `cgroup` `MEMORY_AUDITOR`.
 
-3.  If not already installed and running, install the Control Groups operating system package and start the cgroups service on each Greenplum Database node. The commands that you run to perform these tasks will differ based on the operating system installed on the node. You must be the superuser or have `sudo` access to run these commands:
+3.  Start the cgroups service on each Greenplum Database node. The command that you run to perform this task will differ based on the operating system installed on the node. You must be the superuser or have `sudo` access to run the command:
     -   Redhat/CentOS 7.x/8.x systems:
 
         ```
-        sudo yum install libcgroup-tools
-        sudo cgconfigparser -l /etc/cgconfig.d/gpdb.conf 
+        sudo cgconfigparser -l /etc/cgconfig.conf 
         ```
     -   Redhat/CentOS 6.x systems:
 
         ```
-        sudo yum install libcgroup
         sudo service cgconfig start 
         ```
 
@@ -325,7 +351,7 @@ Complete the following tasks on each node in your Greenplum Database cluster to 
 
     The first line of output identifies the `cgroup` mount point.
 
-5.  Verify that you set up the Greenplum Database cgroups configuration correctly by running the following commands. Replace <cgroup\_mount\_point\> with the mount point that you identified in the previous step:
+5.  Verify that you set up the Greenplum Database cgroups configuration correctly by running the following commands. Replace \<cgroup\_mount\_point\> with the mount point that you identified in the previous step:
 
     ```
     ls -l <cgroup_mount_point>/cpu/gpdb
@@ -336,7 +362,7 @@ Complete the following tasks on each node in your Greenplum Database cluster to 
 
     If these directories exist and are owned by `gpadmin:gpadmin`, you have successfully configured cgroups for Greenplum Database CPU resource management.
 
-6.  To automatically recreate Greenplum Database required cgroup hierarchies and parameters when your system is restarted, configure your system to enable the Linux cgroup service daemon `cgconfig.service` \(Redhat/CentOS 7.x\) or `cgconfig` \(Redhat/CentOS 6.x\) at node start-up. For example, configure one of the following cgroup service commands in your preferred service auto-start tool:
+6.  To automatically recreate Greenplum Database required cgroup hierarchies and parameters when your system is restarted, configure your system to enable the Linux cgroup service daemon `cgconfig.service` \(Redhat/CentOS 7.x/8.x\) or `cgconfig` \(Redhat/CentOS 6.x\) at node start-up. For example, configure one of the following cgroup service commands in your preferred service auto-start tool:
     -   Redhat/CentOS 7.x/8.x systems:
 
         ```

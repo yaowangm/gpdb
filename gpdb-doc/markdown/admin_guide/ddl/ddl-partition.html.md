@@ -24,7 +24,7 @@ Greenplum Database supports:
 -   *list partitioning*: division of data based on a list of values, such as sales territory or product line.
 -   A combination of both types.
 
-![](../graphics/partitions.jpg "Example Multi-level Partition Design")
+![Example Multi-level Partition Design](../graphics/partitions.jpg "Example Multi-level Partition Design")
 
 ## <a id="topic64"></a>Table Partitioning in Greenplum Database 
 
@@ -482,18 +482,6 @@ ALTER TABLE sales TRUNCATE PARTITION FOR (RANK(1));
 You can exchange a partition using the `ALTER TABLE` command. Exchanging a partition swaps one table in place of an existing partition. You can exchange partitions only at the lowest level of your partition hierarchy \(only partitions that contain data can be exchanged\).
 
 You cannot exchange a partition with a replicated table. Exchanging a partition with a partitioned table or a child partition of a partitioned table is not supported.
-
-Partition exchange can be useful for data loading. For example, load a staging table and swap the loaded table into your partition design. You can use partition exchange to change the storage type of older partitions to append-optimized tables. For example:
-
-```
-CREATE TABLE jan12 (LIKE sales) WITH (appendoptimized=true);
-INSERT INTO jan12 SELECT * FROM sales_1_prt_1 ;
-ALTER TABLE sales EXCHANGE PARTITION FOR (DATE '2012-01-01') 
-WITH TABLE jan12;
-
-```
-
-**Note:** This example refers to the single-level definition of the table `sales`, before partitions were added and altered in the previous examples.
 
 **Warning:** If you specify the `WITHOUT VALIDATION` clause, you must ensure that the data in table that you are exchanging for an existing partition is valid against the constraints on the partition. Otherwise, queries against the partitioned table might return incorrect results.
 

@@ -99,11 +99,11 @@ extern struct config_generic *find_option(const char *name, bool create_placehol
 
 extern int listenerBacklog;
 
-/* GUC lists for gp_guc_list_show().  (List of struct config_generic) */
+/* GUC lists for gp_guc_list_init().  (List of struct config_generic) */
 List	   *gp_guc_list_for_explain;
 List	   *gp_guc_list_for_no_plan;
 
-/* For synchornized GUC value is cache in HashTable,
+/* For synchronized GUC value is cache in HashTable,
  * dispatch value along with query when some guc changed
  */
 List       *gp_guc_restore_list = NIL;
@@ -154,7 +154,10 @@ bool		Debug_datumstream_read_print_varlena_info = false;
 bool		Debug_datumstream_write_use_small_initial_buffers = false;
 bool		gp_create_table_random_default_distribution = true;
 bool		gp_allow_non_uniform_partitioning_ddl = true;
+bool		gp_print_create_gang_time = false;
 int			dtx_phase2_retry_second = 0;
+
+bool gp_log_suboverflow_statement = false;
 
 bool		log_dispatch_stats = false;
 
@@ -230,7 +233,6 @@ bool		execute_pruned_plan = false;
 bool		gp_maintenance_mode;
 bool		gp_maintenance_conn;
 bool		allow_segment_DML;
-bool		gp_allow_rename_relation_without_lock = false;
 
 /* Time based authentication GUC */
 char	   *gp_auth_time_override_str = NULL;
@@ -317,7 +319,6 @@ bool		optimizer_enable_constant_expression_evaluation;
 bool		optimizer_enable_bitmapscan;
 bool		optimizer_enable_outerjoin_to_unionall_rewrite;
 bool		optimizer_enable_ctas;
-bool		optimizer_enable_partial_index;
 bool		optimizer_enable_dml;
 bool		optimizer_enable_dml_constraints;
 bool		optimizer_enable_master_only_queries;
@@ -333,7 +334,7 @@ bool		optimizer_enable_mergejoin;
 bool		optimizer_prune_unused_columns;
 bool		optimizer_enable_redistribute_nestloop_loj_inner_child;
 bool		optimizer_force_comprehensive_join_implementation;
-
+bool		optimizer_enable_replicated_table;
 
 /* Optimizer plan enumeration related GUCs */
 bool		optimizer_enumerate_plans;
@@ -517,6 +518,12 @@ static const struct config_enum_entry gp_interconnect_types[] = {
 	{NULL, 0}
 };
 
+static const struct config_enum_entry gp_interconnect_address_types[] = {
+	{"wildcard", INTERCONNECT_ADDRESS_TYPE_WILDCARD},
+	{"unicast", INTERCONNECT_ADDRESS_TYPE_UNICAST},
+	{NULL, 0}
+};
+
 static const struct config_enum_entry gp_log_verbosity[] = {
 	{"terse", GPVARS_VERBOSITY_TERSE},
 	{"off", GPVARS_VERBOSITY_OFF},
@@ -584,16 +591,6 @@ struct config_bool ConfigureNamesBool_gp[] =
 			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
 		},
 		&allow_segment_DML,
-		false,
-		NULL, NULL, NULL
-	},
-	{
-		{"gp_allow_rename_relation_without_lock", PGC_USERSET, CUSTOM_OPTIONS,
-			gettext_noop("Allow ALTER TABLE RENAME without AccessExclusiveLock"),
-			NULL,
-			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
-		},
-		&gp_allow_rename_relation_without_lock,
 		false,
 		NULL, NULL, NULL
 	},
@@ -737,16 +734,6 @@ struct config_bool ConfigureNamesBool_gp[] =
 			gettext_noop("Sort more efficiently when plan requires the first <n> rows at most.")
 		},
 		&gp_enable_sort_limit,
-		true,
-		NULL, NULL, NULL
-	},
-
-	{
-		{"gp_enable_sort_distinct", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("Enable duplicate removal to be performed while sorting."),
-			gettext_noop("Reduces data handling when plan calls for removing duplicates from sorted rows.")
-		},
-		&gp_enable_sort_distinct,
 		true,
 		NULL, NULL, NULL
 	},
@@ -1448,10 +1435,16 @@ struct config_bool ConfigureNamesBool_gp[] =
 
 	{
 		{"gp_disable_tuple_hints", PGC_USERSET, DEVELOPER_OPTIONS,
-			gettext_noop("Specify if reader should set hint bits on tuples."),
+			gettext_noop("Specify if hint bits on tuples should be deferred."),
 			NULL,
 			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
 		},
+		/*
+		 * If gp_disable_tuple_hints is off, always mark buffer dirty.
+		 * If gp_disable_tuple_hints is on, defer marking the buffer dirty
+		 * until after transaction is identified as old.
+		 * (unless it is a catalog table) See: markDirty
+		 */
 		&gp_disable_tuple_hints,
 		true,
 		NULL, NULL, NULL
@@ -1745,6 +1738,17 @@ struct config_bool ConfigureNamesBool_gp[] =
 		},
 		&gp_allow_non_uniform_partitioning_ddl,
 		true,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"gp_print_create_gang_time", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("Allow print information about create gang time."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&gp_print_create_gang_time,
+		false,
 		NULL, NULL, NULL
 	},
 
@@ -2557,17 +2561,6 @@ struct config_bool ConfigureNamesBool_gp[] =
 	},
 
 	{
-		{"optimizer_enable_partial_index", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("Enable heterogeneous index plans."),
-			NULL,
-			GUC_NOT_IN_SAMPLE
-		},
-		&optimizer_enable_partial_index,
-		true,
-		NULL, NULL, NULL
-	},
-
-	{
 		{"optimizer_enable_dml", PGC_USERSET, QUERY_TUNING_METHOD,
 			gettext_noop("Enable DML plans in Pivotal Optimizer (GPORCA)."),
 			NULL,
@@ -2789,7 +2782,7 @@ struct config_bool ConfigureNamesBool_gp[] =
 
 	{
 		{"create_restartpoint_on_ckpt_record_replay", PGC_SIGHUP, DEVELOPER_OPTIONS,
-			gettext_noop("create a restartpoint only on mirror immediately after replaying a checkpoint record."),
+			gettext_noop("Creates a restartpoint only on mirror immediately after replaying a checkpoint record."),
 			NULL
 		},
 		&create_restartpoint_on_ckpt_record_replay,
@@ -2898,6 +2891,26 @@ struct config_bool ConfigureNamesBool_gp[] =
 		&optimizer_force_comprehensive_join_implementation,
 		false,
 		NULL, NULL, NULL
+	},
+	{
+		{"optimizer_enable_replicated_table", PGC_USERSET, DEVELOPER_OPTIONS,
+		 gettext_noop("Enable replicated tables."),
+		 NULL,
+		 GUC_NOT_IN_SAMPLE
+		 },
+		 &optimizer_enable_replicated_table,
+		 true,
+		 NULL, NULL, NULL
+	},
+
+	{
+		{"gp_log_suboverflow_statement", PGC_SUSET, LOGGING_WHAT,
+		 gettext_noop("Enable logging of statements that cause subtransaction overflow."),
+		 NULL,
+		 },
+		 &gp_log_suboverflow_statement,
+		 false,
+		 NULL, NULL, NULL
 	},
 
 	/* End-of-list marker */
@@ -3721,7 +3734,7 @@ struct config_int ConfigureNamesInt_gp[] =
 
 	{
 		{"runaway_detector_activation_percent", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("The runaway detector activates if the used vmem exceeds this percentage of the vmem quota. Set to 100 to disable runaway detection."),
+			gettext_noop("The runaway detector activates if the used vmem exceeds this percentage of the vmem quota. Set to 0 or 100 to disable runaway detection."),
 			NULL,
 		},
 		&runaway_detector_activation_percent,
@@ -3927,7 +3940,7 @@ struct config_int ConfigureNamesInt_gp[] =
 			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
 		},
 		&optimizer_array_expansion_threshold,
-		100, 0, INT_MAX,
+		20, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4011,7 +4024,7 @@ struct config_int ConfigureNamesInt_gp[] =
 		{"repl_catchup_within_range", PGC_SUSET, REPLICATION_STANDBY,
 			gettext_noop("Sets the maximum number of xlog segments allowed to lag"
 					  " when the backends can start blocking despite the WAL"
-					   " sender being in catchup phase. (Master Mirroring)"),
+					   " sender being in catchup phase."),
 			NULL,
 			GUC_SUPERUSER_ONLY
 		},
@@ -4122,6 +4135,16 @@ struct config_int ConfigureNamesInt_gp[] =
 		},
 		&gp_dispatch_keepalives_count,
 		0, 0, MAX_GP_DISPATCH_KEEPALIVES_COUNT,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"gp_max_parallel_cursors", PGC_SUSET, RESOURCES,
+			gettext_noop("Parallel cursor concurrency control from the source cluster side, -1 means no limit, which is the default"),
+			NULL, GUC_SUPERUSER_ONLY | GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
+		},
+		&gp_max_parallel_cursors,
+		-1, -1, 1024,
 		NULL, NULL, NULL
 	},
 
@@ -4405,7 +4428,7 @@ struct config_string ConfigureNamesString_gp[] =
 
 	{
 		{"gp_default_storage_options", PGC_USERSET, APPENDONLY_TABLES,
-			gettext_noop("default options for appendonly storage."),
+			gettext_noop("Sets the default options for appendonly storage."),
 			NULL,
 			GUC_NOT_IN_SAMPLE
 		},
@@ -4600,6 +4623,16 @@ struct config_enum ConfigureNamesEnum_gp[] =
 		},
 		&Gp_interconnect_type,
 		INTERCONNECT_TYPE_UDPIFC, gp_interconnect_types,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"gp_interconnect_address_type", PGC_BACKEND, GP_ARRAY_TUNING,
+		 gettext_noop("Sets the interconnect address type used for inter-node communication."),
+		 gettext_noop("Valid values are \"unicast\" and \"wildcard\"")
+		},
+		&Gp_interconnect_address_type,
+		INTERCONNECT_ADDRESS_TYPE_UNICAST, gp_interconnect_address_types,
 		NULL, NULL, NULL
 	},
 

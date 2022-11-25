@@ -37,7 +37,6 @@
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/partition.h"
-#include "catalog/pg_am.h"
 #include "catalog/pg_appendonly.h"
 #include "catalog/pg_attribute_encoding.h"
 #include "catalog/pg_collation.h"
@@ -48,6 +47,7 @@
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_proc_d.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_tablespace.h"
@@ -55,6 +55,7 @@
 #include "catalog/storage.h"
 #include "catalog/storage_xlog.h"
 #include "catalog/toasting.h"
+#include "catalog/gp_fastsequence.h"
 #include "cdb/cdbappendonlyam.h"
 #include "cdb/cdbappendonlyxlog.h"
 #include "cdb/cdbaocsam.h"
@@ -269,7 +270,7 @@ static void truncate_check_activity(Relation rel);
 static void RangeVarCallbackForTruncate(const RangeVar *relation,
 										Oid relId, Oid oldRelId, void *arg);
 static List *MergeAttributes(List *schema, List *supers, char relpersistence,
-							 bool is_partition, List **supconstr);
+							 bool is_partition, List **supconstr, bool gp_alter_part);
 static void MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel);
 static bool MergeCheckConstraint(List *constraints, char *name, Node *expr);
 static void MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel);
@@ -334,6 +335,8 @@ static ObjectAddress ATExecAddColumn(List **wqueue, AlteredTableInfo *tab,
 									 Relation rel, ColumnDef *colDef,
 									 bool recurse, bool recursing,
 									 bool if_not_exists, LOCKMODE lockmode);
+static void ATExecSetColumnEncoding(AlteredTableInfo *tab, Relation rel,
+									AlterTableCmd *cmd);
 static bool check_for_column_name_collision(Relation rel, const char *colname,
 											bool if_not_exists);
 static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
@@ -448,6 +451,8 @@ static void change_owner_recurse_to_sequences(Oid relationOid,
 static ObjectAddress ATExecClusterOn(Relation rel, const char *indexName,
 									 LOCKMODE lockmode);
 static void ATExecDropCluster(Relation rel, LOCKMODE lockmode);
+static void ATPrepSetAccessMethod(AlteredTableInfo *tab, Relation rel, const char *amname);
+static void ATExecSetAccessMethodNoStorage(Relation rel, Oid newAccessMethod);
 static bool ATPrepChangePersistence(Relation rel, bool toLogged);
 static void ATPrepSetTableSpace(AlteredTableInfo *tab, Relation rel,
 								const char *tablespacename, LOCKMODE lockmode);
@@ -455,6 +460,8 @@ static void ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmo
 static void ATExecSetTableSpaceNoStorage(Relation rel, Oid newTableSpace);
 static void ATExecSetRelOptions(Relation rel, List *defList,
 								AlterTableType operation,
+								bool *aoopt_changed,
+								Oid newam,
 								LOCKMODE lockmode);
 static void ATExecEnableDisableTrigger(Relation rel, const char *trigname,
 									   char fires_when, bool skip_system, LOCKMODE lockmode);
@@ -515,6 +522,9 @@ static bool prebuild_temp_table(Relation rel, RangeVar *tmpname, DistributedBy *
 
 static void prepare_AlterTableStmt_for_dispatch(AlterTableStmt *stmt);
 static List *strip_gpdb_part_commands(List *cmds);
+static void populate_rel_col_encodings(Relation rel, List *stenc, List *withOptions);
+static Datum get_rel_opts(Relation rel);
+static void clear_rel_opts(Relation rel);
 
 
 /* ----------------------------------------------------------------
@@ -556,7 +566,9 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	List	   *old_constraints;
 	List	   *rawDefaults;
 	List	   *cookedDefaults;
+	List       *parentenc = NIL;
 	Datum		reloptions;
+	Datum		oldoptions = (Datum) 0;
 	ListCell   *listptr;
 	AttrNumber	attnum;
 	bool		partitioned;
@@ -564,9 +576,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	Oid			ofTypeId;
 	ObjectAddress address;
 	LOCKMODE	parentLockmode;
-	const char *accessMethod = NULL;
 	Oid			accessMethodId = InvalidOid;
-	Oid			amHandlerOid = InvalidOid;
 	List	   *schema;
 	List	   *cooked_constraints;
 	bool		shouldDispatch = dispatch &&
@@ -754,32 +764,66 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 * a type of relation that needs one, use the default.
 	 */
 	if (stmt->accessMethod != NULL)
+		accessMethodId = get_table_am_oid(stmt->accessMethod, false);
+	else if (stmt->partbound && (relkind == RELKIND_RELATION || relkind == RELKIND_PARTITIONED_TABLE))
 	{
-		accessMethod = stmt->accessMethod;
+		HeapTuple	tup;
+		Oid			relid;
 
-		if (partitioned)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("specifying a table access method is not supported on a partitioned table")));
+		/*
+		 * For partitioned tables, when no access method is specified, we
+		 * default to the parent table's AM.
+		 */
+		Assert(list_length(inheritOids) == 1);
+		relid = linitial_oid(inheritOids);
+		tup = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+		if (!HeapTupleIsValid(tup))
+			elog(ERROR, "cache lookup failed for relation %u", relid);
 
+		accessMethodId = ((Form_pg_class) GETSTRUCT(tup))->relam;
+
+		ReleaseSysCache(tup);
+
+		if (!OidIsValid(accessMethodId))
+			accessMethodId = get_table_am_oid(default_table_access_method, false);
 	}
 	else if (relkind == RELKIND_RELATION ||
 			 relkind == RELKIND_TOASTVALUE ||
+			 relkind == RELKIND_PARTITIONED_TABLE ||
 			 relkind == RELKIND_MATVIEW)
-		accessMethod = default_table_access_method;
+		accessMethodId = get_table_am_oid(default_table_access_method, false);
 
-	/* look up the access method, verify it is for a table */
-	if (accessMethod != NULL)
+	/* 
+	 * GPDB: for partitioned tables, inherit reloptions from the parent. 
+	 * Note this is applicable only if the parent has the same AM as the child.
+	 */
+	if (stmt->partbound && (relkind == RELKIND_RELATION || relkind == RELKIND_PARTITIONED_TABLE))
 	{
-		accessMethodId = get_table_am_oid(accessMethod, false);
-		amHandlerOid = get_table_am_handler_oid(accessMethod, false);
-	}
+		Oid			parentrelid;
+		Relation 		parentrel;
 
+		/*
+		 * For partitioned children, when no reloptions is specified, we
+		 * default to the parent table's reloptions.
+		 */
+		Assert(list_length(inheritOids) == 1);
+		parentrelid = linitial_oid(inheritOids);
+		parentrel = table_open(parentrelid, AccessShareLock);
+
+		if (parentrel->rd_rel->relam == accessMethodId)
+		{
+			oldoptions = get_rel_opts(parentrel);
+			if (accessMethodId == AO_COLUMN_TABLE_AM_OID)
+				parentenc = rel_get_column_encodings(parentrel);
+		}
+
+		table_close(parentrel, AccessShareLock);
+	}
 
 	/*
 	 * Parse and validate reloptions, if any.
 	 */
-	reloptions = transformRelOptions((Datum) 0, stmt->options, NULL, validnsps,
+	reloptions = transformRelOptions((Datum) oldoptions, stmt->options, NULL, validnsps,
 									 true, false);
 
 	/*
@@ -787,11 +831,9 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 * appendonly relations. This check can not be performed earlier because it
 	 * is needed to know the access method.
 	 */
-	if ((amHandlerOid == AO_ROW_TABLE_AM_HANDLER_OID ||
-			amHandlerOid == AO_COLUMN_TABLE_AM_HANDLER_OID))
+	if ((accessMethodId == AO_ROW_TABLE_AM_OID ||
+			accessMethodId == AO_COLUMN_TABLE_AM_OID))
 	{
-		Assert(relkind == RELKIND_MATVIEW || relkind == RELKIND_RELATION );
-
 		/*
 		 * Extract and process any WITH options supplied, otherwise use defaults
 		 *
@@ -809,7 +851,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 									 stdRdOptions->compresslevel,
 									 stdRdOptions->compresstype,
 									 stdRdOptions->checksum,
-									 (amHandlerOid == AO_COLUMN_TABLE_AM_HANDLER_OID));
+									 (accessMethodId == AO_COLUMN_TABLE_AM_OID));
 
 		reloptions = transformAOStdRdOptions(stdRdOptions, reloptions);
 	} else if (relkind == RELKIND_VIEW)
@@ -841,7 +883,8 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 			MergeAttributes(schema, inheritOids,
 							stmt->relation->relpersistence,
 							stmt->partbound != NULL,
-							&old_constraints);
+							&old_constraints,
+							stmt->gp_style_alter_part);
 	}
 	else
 	{
@@ -947,15 +990,17 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 * legitimately error out, it is prefered to call it before updating the
 	 * catalog in heap_create_with_catalog().
 	 *
-	 * For RELKIND_PARTITIONED_TABLE, let the transformation of attribute
-	 * encoding happen. We don't store it for parent partition in
-	 * pg_attribute_encoding table. Transformed encoding will be used to
-	 * create child partition create stmts, hence avoid marking it NIL as
-	 * well.
+	 * For RELKIND_PARTITIONED_TABLE, we will create a list of encodings
+	 * for the root partition to add to pg_attribute_encoding which includes
+	 * explicitly specified column encodings and values picked from defaults
+	 * We will also transform the stmt->attr_encodings to be passed down to
+	 * create child partition create stmts which would only include explicitly
+	 * specified column encodings from the current root partition
 	 *
 	 * This is done in dispatcher (and in utility mode). In QE, we receive
 	 * the already-processed options from the QD.
 	 */
+
 	if ((relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW ||
 		 relkind == RELKIND_PARTITIONED_TABLE) &&
 		Gp_role != GP_ROLE_EXECUTE)
@@ -973,11 +1018,12 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 								schema,
 								stmt->attr_encodings,
 								stmt->options,
+								parentenc,
 								relkind == RELKIND_PARTITIONED_TABLE,
-								amHandlerOid != AO_COLUMN_TABLE_AM_HANDLER_OID 
+								accessMethodId != AO_COLUMN_TABLE_AM_OID
 										&& !stmt->partbound 
 										&& !stmt->partspec /* errorOnEncodingClause */);
-		if (amHandlerOid != AO_COLUMN_TABLE_AM_HANDLER_OID && relkind != RELKIND_PARTITIONED_TABLE)
+		if (accessMethodId != AO_COLUMN_TABLE_AM_OID && relkind != RELKIND_PARTITIONED_TABLE)
 			stmt->attr_encodings = NIL;
 	}
 
@@ -1081,7 +1127,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	/*
 	 * If this is an append-only relation, create the auxliary tables necessary
 	 */
-	if (RelationIsAppendOptimized(rel))
+	if (RelationIsAppendOptimized(rel) && relkind != RELKIND_PARTITIONED_TABLE)
 		NewRelationCreateAOAuxTables(RelationGetRelid(rel), stmt->buildAoBlkdir);
 
 	/*
@@ -1107,8 +1153,23 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		cooked_constraints = list_concat(cooked_constraints, newCookedDefaults);
 	}
 
-	if (stmt->attr_encodings && (relkind != RELKIND_PARTITIONED_TABLE))
-		AddRelationAttributeEncodings(rel, stmt->attr_encodings);
+	if (relkind == RELKIND_PARTITIONED_TABLE && RelationIsAoCols(rel))
+	{
+		List *part_attr_encodings =
+			transformColumnEncoding(NULL /* Relation */,
+									schema,
+									stmt->attr_encodings,
+									stmt->options,
+									parentenc,
+									false,
+									accessMethodId != AO_COLUMN_TABLE_AM_OID
+									&& !stmt->partbound && !stmt->partspec
+									/* errorOnEncodingClause */);
+
+		AddRelationAttributeEncodings(relationId, part_attr_encodings);
+	}
+	else if (stmt->attr_encodings && RelationIsAoCols(rel))
+		AddRelationAttributeEncodings(relationId, stmt->attr_encodings);
 
 	/*
 	 * Make column generation expressions visible for use by partitioning.
@@ -1726,6 +1787,14 @@ ao_aux_tables_safe_truncate(Relation rel)
 	relid_set_new_relfilenode(aoseg_relid);
 	relid_set_new_relfilenode(aoblkdir_relid);
 	relid_set_new_relfilenode(aovisimap_relid);
+
+	/*
+	 * Reset existing gp_fastsequence entries for the segrel to an initial entry.
+	 * This mimics the state of the gp_fastsequence row when an empty AO/AOCS
+	 * table is created.
+	 */
+	RemoveFastSequenceEntry(aoseg_relid);
+	InsertInitialFastSequenceEntries(aoseg_relid);
 }
 
 /*
@@ -2481,7 +2550,7 @@ storage_name(char c)
  */
 List *
 MergeAttributes(List *schema, List *supers, char relpersistence,
-				bool is_partition, List **supconstr)
+				bool is_partition, List **supconstr, bool gp_style_alter_part)
 {
 	ListCell   *entry;
 	List	   *inhSchema = NIL;
@@ -2606,12 +2675,12 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		 * current transaction, such as being used in some manner by an
 		 * enclosing command.
 		 *
-		 * GPDB_12_MERGE_FIXME: ALTER TABLE ADD PARTITION can't meet this
-		 * upstream expectation on QD. As during alter, reference is already
-		 * held by alter command, and when we generate CREATE STMT and execute
-		 * them we have 2 reference instead on 1 here.
+		 * GPDB-style ALTER TABLE ADD|SPLIT PARTITION can't meet this 
+		 * upstream expectation on QD. As during alter, reference is 
+		 * already held by alter command, and when we generate CREATE 
+		 * STMT and execute them we have 2 reference instead on 1 here.
 		 */
-		if (is_partition && (Gp_role != GP_ROLE_DISPATCH))
+		if (is_partition && (Gp_role != GP_ROLE_DISPATCH || !gp_style_alter_part))
 			CheckTableNotInUse(relation, "CREATE TABLE .. PARTITION OF");
 
 		/*
@@ -3512,40 +3581,6 @@ renameatt_internal(Oid myrelid,
 }
 
 /*
- * A helper function for RenameRelation, to createa a very minimal, fake,
- * RelationData struct for a relation. This is used in
- * gp_allow_rename_relation_without_lock mode, in place of opening the
- * relcache entry for real.
- *
- * RenameRelation only needs the rd_rel field to be filled in, so that's
- * all we fetch.
- */
-static Relation
-fake_relation_open(Oid myrelid)
-{
-	Relation relrelation;    /* for RELATION relation */
-	Relation fakerel;
-	HeapTuple reltup;
-
-	fakerel = palloc0(sizeof(RelationData));
-
-	/*
-	 * Find relation's pg_class tuple, and make sure newrelname isn't in use.
-	 */
-	relrelation = heap_open(RelationRelationId, RowExclusiveLock);
-
-	reltup = SearchSysCacheCopy(RELOID,
-								ObjectIdGetDatum(myrelid),
-								0, 0, 0);
-	if (!HeapTupleIsValid(reltup))        /* shouldn't happen */
-		elog(ERROR, "cache lookup failed for relation %u", myrelid);
-	fakerel->rd_rel = (Form_pg_class) GETSTRUCT(reltup);
-
-	heap_close(relrelation, RowExclusiveLock);
-
-	return fakerel;
-}
-/*
  * Perform permissions and integrity checks before acquiring a relation lock.
  */
 static void
@@ -3795,18 +3830,10 @@ RenameRelation(RenameStmt *stmt)
 	}
 
 	/*
-	 * In Postgres, grab an exclusive lock on the target table, index, sequence
+	 * Grab an exclusive lock on the target table, index, sequence
 	 * or view, which we will NOT release until end of transaction.
-	 *
-	 * In GPDB, added supportability feature under GUC to allow rename table
-	 * without AccessExclusiveLock for scenarios like directly modifying system
-	 * catalogs. This will change transaction isolation behaviors, however, this
-	 * won't cause any data corruption.
 	 */
-	if (gp_allow_rename_relation_without_lock)
-		targetrelation = fake_relation_open(relid);
-	else
-		targetrelation = relation_open(relid, AccessExclusiveLock);
+	targetrelation = relation_open(relid, AccessExclusiveLock);
 	oldrelname = pstrdup(RelationGetRelationName(targetrelation));
 
 	/* Do the work */
@@ -3818,8 +3845,7 @@ RenameRelation(RenameStmt *stmt)
 	/*
 	 * Close rel, but keep exclusive lock!
 	 */
-	if (!gp_allow_rename_relation_without_lock)
-		relation_close(targetrelation, NoLock);
+	relation_close(targetrelation, NoLock);
 
 	ObjectAddressSet(address, RelationRelationId, relid);
 
@@ -3839,7 +3865,6 @@ RenameRelationInternal(Oid myrelid, const char *newrelname, bool is_internal, bo
 	Oid			namespaceId;
 
 	/*
-	 * In Postgres:
 	 * Grab a lock on the target relation, which we will NOT release until end
 	 * of transaction.  We need at least a self-exclusive lock so that
 	 * concurrent DDL doesn't overwrite the rename if they start updating
@@ -3848,16 +3873,8 @@ RenameRelationInternal(Oid myrelid, const char *newrelname, bool is_internal, bo
 	 * handle this information changing under them.  For indexes, we can use a
 	 * reduced lock level because RelationReloadIndexInfo() handles indexes
 	 * specially.
-	 *
-	 * In GPDB, added supportability feature under GUC to allow rename table
-	 * without AccessExclusiveLock for scenarios like directly modifying system
-	 * catalogs. This will change transaction isolation behaviors, however, this
-	 * won't cause any data corruption.
 	 */
-	if (gp_allow_rename_relation_without_lock)
-		targetrelation = fake_relation_open(myrelid);
-	else
-		targetrelation = relation_open(myrelid, is_index ? ShareUpdateExclusiveLock : AccessExclusiveLock);
+	targetrelation = relation_open(myrelid, is_index ? ShareUpdateExclusiveLock : AccessExclusiveLock);
 	namespaceId = RelationGetNamespace(targetrelation);
 
 	/*
@@ -3929,8 +3946,7 @@ RenameRelationInternal(Oid myrelid, const char *newrelname, bool is_internal, bo
 	/*
 	 * Close rel, but keep lock!
 	 */
-	if (!gp_allow_rename_relation_without_lock)
-		relation_close(targetrelation, NoLock);
+	relation_close(targetrelation, NoLock);
 }
 
 /*
@@ -4155,6 +4171,36 @@ strip_gpdb_part_commands(List *cmds)
 	return newcmds;
 }
 
+/* 
+ * Populate the column encoding option for each column in the relation. 
+ */
+static void populate_rel_col_encodings(Relation rel, List *stenc, List *withOptions)
+{
+	int 		attno;
+	List 		*colDefs = NIL;
+	TupleDesc 	tupdesc = RelationGetDescr(rel);
+
+	/* Figure out the column definition list. */
+	for (attno = 0; attno < tupdesc->natts; attno++)
+	{
+		Form_pg_attribute 	att = TupleDescAttr(tupdesc, attno);
+		ColumnDef 		*cd = makeColumnDef(NameStr(att->attname),
+								att->atttypid, 
+								att->atttypmod,
+								0);
+		colDefs = lappend(colDefs, cd);
+	}
+
+	List *attr_encodings = transformColumnEncoding(rel,
+							colDefs /*column clauses*/,
+							stenc /*encoding clauses*/,
+							withOptions /*withOptions*/,
+							NULL /*parent encoding*/,
+							false /*explicitOnly*/,
+							false /*errorOnEncodingClause*/);
+	AddRelationAttributeEncodings(RelationGetRelid(rel), attr_encodings);
+}
+
 /*
  * AlterTableInternal
  *
@@ -4236,8 +4282,10 @@ AlterTableGetLockLevel(List *cmds)
 				/*
 				 * These subcommands rewrite the heap, so require full locks.
 				 */
+			case AT_SetColumnEncoding: /* must rewrite heap */
 			case AT_AddColumn:	/* may rewrite heap, in some cases and visible
 								 * to SELECT */
+			case AT_SetAccessMethod:	/* must rewrite heap */
 			case AT_SetTableSpace:	/* must rewrite heap */
 			case AT_AlterColumnType:	/* must rewrite heap */
 				cmd_lockmode = AccessExclusiveLock;
@@ -4616,6 +4664,11 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			/* Recursion occurs during execution phase */
 			pass = AT_PASS_ADD_COL;
 			break;
+		case AT_SetColumnEncoding: /* ALTER COLUMN SET ENCODING */
+			ATSimplePermissions(rel,ATT_TABLE);
+			ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
+			pass = AT_PASS_MISC;
+			break;
 		case AT_ColumnDefault:	/* ALTER COLUMN DEFAULT */
 
 			/*
@@ -4735,8 +4788,9 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			pass = AT_PASS_MISC;
 			break;
 		case AT_ChangeOwner:	/* ALTER OWNER */
-			/* This command never recurses */
-			/* No command-specific prep needed */
+			/* GPDB: we have historically been performing recurse by default for partition tables. */
+			if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+				ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
 			pass = AT_PASS_MISC;
 			break;
 		case AT_ClusterOn:		/* CLUSTER ON */
@@ -4772,6 +4826,20 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			ATSimplePermissions(rel, ATT_TABLE | ATT_FOREIGN_TABLE);
 			pass = AT_PASS_DROP;
 			break;
+		case AT_SetAccessMethod:	/* SET ACCESS METHOD */
+			ATSimplePermissions(rel, ATT_TABLE | ATT_MATVIEW);
+
+			/* check if another access method change was already requested */
+			if (OidIsValid(tab->newAccessMethod))
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						 errmsg("cannot have multiple SET ACCESS METHOD subcommands")));
+
+			if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+				ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
+			ATPrepSetAccessMethod(tab, rel, cmd->name);
+			pass = AT_PASS_MISC;	/* does not matter; no work in Phase 2 */
+			break;
 		case AT_SetTableSpace:	/* SET TABLESPACE */
 			ATSimplePermissions(rel, ATT_TABLE | ATT_MATVIEW | ATT_INDEX |
 								ATT_PARTITIONED_INDEX);
@@ -4787,20 +4855,19 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		case AT_ResetRelOptions:	/* RESET (...) */
 		case AT_ReplaceRelOptions:	/* reset them all, then set just these */
 			ATSimplePermissions(rel, ATT_TABLE | ATT_VIEW | ATT_MATVIEW | ATT_INDEX);
-			/* This command never recurses */
+			/* GPDB: recurse when setting reloptions of root partition w/o 'ONLY' keyword. */
+			if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+				ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
 			/* No command-specific prep needed */
 			pass = AT_PASS_MISC;
 			break;
 		case AT_SetDistributedBy:	/* SET DISTRIBUTED BY */
-			ATSimplePermissions(rel, ATT_TABLE);
+			ATSimplePermissions(rel, ATT_TABLE | ATT_FOREIGN_TABLE);
 
 			if ( !recursing ) /* MPP-5772, MPP-5784 */
 			{
 				DistributedBy *ldistro;
 				GpPolicy   *policy;
-
-				// GPDB_12_MERGE_FIXME: is this still needed?
-				//ATExternalPartitionCheck(cmd->subtype, rel, recursing);
 
 				Assert(IsA(cmd->def, List));
 				/* The distributeby clause is the second element of cmd->def */
@@ -4867,7 +4934,6 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		case AT_ExpandTable:
 			ATSimplePermissions(rel, ATT_TABLE | ATT_FOREIGN_TABLE | ATT_MATVIEW);
 
-			/* GPDB_12_MERGE_FIXME: do we have these checks on ATTACH? */
 			if (!recursing)
 			{
 				if (Gp_role == GP_ROLE_DISPATCH &&
@@ -4896,7 +4962,6 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		case AT_ExpandPartitionTablePrepare:
 			ATSimplePermissions(rel, ATT_TABLE | ATT_FOREIGN_TABLE | ATT_MATVIEW);
 
-			/* GPDB_12_MERGE_FIXME: do we have these checks on ATTACH? */
 			if (!recursing)
 			{
 				if (Gp_role == GP_ROLE_DISPATCH &&
@@ -4971,6 +5036,8 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		case AT_DisableTrigAll:
 		case AT_DisableTrigUser:
 			ATSimplePermissions(rel, ATT_TABLE | ATT_FOREIGN_TABLE);
+			if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+				ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode);
 			pass = AT_PASS_MISC;
 			break;
 		case AT_EnableRule:		/* ENABLE/DISABLE RULE variants */
@@ -5128,6 +5195,9 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 									  true, false,
 									  cmd->missing_ok, lockmode);
 			break;
+		case AT_SetColumnEncoding:
+			ATExecSetColumnEncoding(tab, rel, cmd);
+			break;
 		case AT_ColumnDefault:	/* ALTER COLUMN DEFAULT */
 			address = ATExecColumnDefault(rel, cmd->name, cmd->def, lockmode);
 			break;
@@ -5257,6 +5327,39 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		case AT_DropOids:		/* SET WITHOUT OIDS */
 			/* nothing to do here, oid columns don't exist anymore */
 			break;
+		case AT_SetAccessMethod:	/* SET ACCESS METHOD */
+			/* Set reloptions if specified any. Otherwise handled specially in Phase 3. */
+			{
+				bool aoopt_changed = false;
+
+				/* If we are changing access method, simply remove all the existing ones. */
+				if (OidIsValid(tab->newAccessMethod))
+					clear_rel_opts(rel);
+
+				ATExecSetRelOptions(rel, (List *) cmd->def, cmd->subtype, &aoopt_changed, tab->newAccessMethod, lockmode);
+				CommandCounterIncrement(); /* make reloptions change visiable */
+
+				/* 
+				 * When user sets the same access method as the existing one, the
+				 * rewrite flag won't be set. But it's possible that the storage
+				 * option changed, in which case we'll still have to rewrite.
+				 */
+				if (aoopt_changed)
+					tab->rewrite |= AT_REWRITE_ALTER_RELOPTS;
+			}
+
+			/* If we are changing AM to AOCO, add pg_attribute_encoding entries for each column. */
+			if (tab->newAccessMethod == AO_COLUMN_TABLE_AM_OID) 
+				populate_rel_col_encodings(rel, NULL, (List*)cmd->def);
+
+			/*
+			 * Only do this when it's a valid AM change and just for partitioned tables, 
+			 * for which this is just a catalog change. Other relation types which have
+			 * storage are handled by Phase 3.
+			 */
+			if (OidIsValid(tab->newAccessMethod) && rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+				ATExecSetAccessMethodNoStorage(rel, tab->newAccessMethod);
+			break;
 		case AT_SetTableSpace:	/* SET TABLESPACE */
 
 			/*
@@ -5272,7 +5375,15 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		case AT_SetRelOptions:	/* SET (...) */
 		case AT_ResetRelOptions:	/* RESET (...) */
 		case AT_ReplaceRelOptions:	/* replace entire option list */
-			ATExecSetRelOptions(rel, (List *) cmd->def, cmd->subtype, lockmode);
+			{
+				bool 		aoopt_changed = false;
+
+				ATExecSetRelOptions(rel, (List *) cmd->def, cmd->subtype, &aoopt_changed, InvalidOid, lockmode);
+
+				/* Will rewrite table if there's a change to the AO reloptions. */
+				if (aoopt_changed)
+					tab->rewrite |= AT_REWRITE_ALTER_RELOPTS;
+			}
 			break;
 		case AT_EnableTrig:		/* ENABLE TRIGGER name */
 			ATExecEnableDisableTrigger(rel, cmd->name,
@@ -5564,7 +5675,7 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode)
 		/*
 		 * We only need to rewrite the table if at least one column needs to
 		 * be recomputed, we are adding/removing the OID column, or we are
-		 * changing its persistence.
+		 * changing its persistence or access method.
 		 *
 		 * There are two reasons for requiring a rewrite when changing
 		 * persistence: on one hand, we need to ensure that the buffers
@@ -5577,8 +5688,10 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode)
 		{
 			/* Build a temporary relation and copy data */
 			Oid			OIDNewHeap;
+			Oid			NewAccessMethod;
 			Oid			NewTableSpace;
 			char		persistence;
+			TransactionId relfrozenxid;
 
 			OldHeap = table_open(tab->relid, NoLock);
 
@@ -5616,6 +5729,15 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode)
 				NewTableSpace = tab->newTableSpace;
 			else
 				NewTableSpace = oldTableSpace;
+
+			/*
+			 * Select destination access method (same as original unless user
+			 * requested a change)
+			 */
+			if (OidIsValid(tab->newAccessMethod))
+				NewAccessMethod = tab->newAccessMethod;
+			else
+				NewAccessMethod = OldHeap->rd_rel->relam;
 
 			/*
 			 * Select persistence of transient table (same as original unless
@@ -5656,8 +5778,9 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode)
 			 * persistence. That wouldn't work for pg_class, but that can't be
 			 * unlogged anyway.
 			 */
-			OIDNewHeap = make_new_heap(tab->relid, NewTableSpace, persistence,
-									   lockmode, hasIndexes, false);
+			OIDNewHeap = make_new_heap(tab->relid, NewTableSpace, NewAccessMethod,
+									   tab->new_crsds, persistence, lockmode,
+									   hasIndexes, false);
 
 			/*
 			 * Copy the heap data into the new table with the desired
@@ -5679,13 +5802,36 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode)
 			 * over to our original pg_class tuple. We do not want to do this
 			 * in the case of ALTER TABLE rewrites as the temp relfile will
 			 * not have correct stats.
+			 *
+			 * GPDB: Since pg_class.relfrozenxid doesn't mean anything for
+			 * AO/AOCO tables, and should not be set, pass in
+			 * InvalidTransactionId instead of RecentXmin.
 			 */
+
+			/*
+			 * Example workflow of changing access method from a
+			 * Heap table (Oid:a) to an AO table:
+			 * - Create transient AO table (Oid:b) and its AO aux tables in
+			 * 	 make_new_heap
+			 * - Copy table data into the transient table
+			 * - Swap Oids in the pg_appendonly entry so that newly generated
+			 * 	 aux tables are mapped to Oid a in ATAOEntries
+			 * - Swap attributes in pg_class entry between the two tables
+			 * 	 (such as relfilenode, relam, ...)
+			 * - Now dropping the transient table will use the heap AM and
+			 *   delete the original heap relation file.
+			 */
+
+			if (NewAccessMethod == AO_ROW_TABLE_AM_OID || NewAccessMethod == AO_COLUMN_TABLE_AM_OID)
+				relfrozenxid = InvalidTransactionId;
+			else
+				relfrozenxid = RecentXmin;
 			finish_heap_swap(tab->relid, OIDNewHeap,
 							 false, false,
 							 false /* swap_stats */,
 							 true,
 							 !OidIsValid(tab->newTableSpace),
-							 RecentXmin,
+							 relfrozenxid,
 							 ReadNextMultiXactId(),
 							 persistence);
 		}
@@ -5971,8 +6117,26 @@ ATAocsWriteNewColumns(AlteredTableInfo *tab)
 	rel = heap_open(tab->relid, NoLock);
 	Assert(RelationIsAoCols(rel));
 
-	/* Try to recycle any old segfiles first. */
-	AppendOptimizedRecycleDeadSegments(rel);
+	/*
+     * There might be AWAITING_DROP segments occupying spaces for failing
+     * to drop at VACUUM in the case of cleaning up happened concurrently
+     * with earlier readers which was accessing the dead segment files.
+     *
+     * We used to call AppendOptimizedRecycleDeadSegments() (current name is
+     * ao_vacuum_rel_recycle_dead_segments) to recycle those segfiles to save
+     * spaces in this scenario. But it didn't do corresponding index tuples
+     * cleanup for unknown reason.
+     *
+     * After optimizing VACUUM AO strategy, we did refactor for
+     * AppendOptimizedRecycleDeadSegments() a little bit and combine
+     * dead segfiles cleanup with corresponding indexes cleanup together.
+     * While it seems to be impossible to pass index vacuuming parameter in
+     * this scenario, so we removed AppendOptimizedRecycleDeadSegments() out
+     * of this function and dedicated it to be called only in VACUUM scenario.
+     *
+     * We are supposed to be fine without recycling spaces here, or find
+     * another way to fix it if that does become a real problem.
+     */
 
 	segInfos = GetAllAOCSFileSegInfo(rel, snapshot, &nseg, NULL);
 	basepath = relpathbackend(rel->rd_node, rel->rd_backend, MAIN_FORKNUM);
@@ -6264,17 +6428,8 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 		snapshot = RegisterSnapshot(GetLatestSnapshot());
 		scan = table_beginscan(oldrel, snapshot, 0, NULL);
 
-		if (newrel && RelationIsAoRows(newrel))
-		{
-			/* Table access method is not permitted to change */
-			Assert(RelationIsAoRows(oldrel));
-			appendonly_dml_init(newrel, CMD_INSERT);
-		}
-		else if (newrel && RelationIsAoCols(newrel))
-		{
-			Assert(RelationIsAoCols(oldrel));
-			aoco_dml_init(newrel, CMD_INSERT);
-		}
+		if (newrel && newrel->rd_tableam)
+			table_dml_init(newrel);
 
 		/*
 		 * Switch to per-tuple memory context and reset it for each tuple
@@ -6473,6 +6628,9 @@ ATGetQueueEntry(List **wqueue, Relation rel)
 	tab->relid = relid;
 	tab->relkind = rel->rd_rel->relkind;
 	tab->oldDesc = CreateTupleDescCopyConstr(RelationGetDescr(rel));
+	tab->newAccessMethod = InvalidOid;
+	tab->new_crsds = NIL;
+	tab->newTableSpace = InvalidOid;
 	tab->newrelpersistence = RELPERSISTENCE_PERMANENT;
 	tab->chgPersistence = false;
 
@@ -6653,6 +6811,22 @@ ATSimpleRecursion(List **wqueue, Relation rel,
 				continue;
 			/* find_all_inheritors already got lock */
 			childrel = relation_open(childrelid, NoLock);
+
+			/*
+			 * GPDB: for now we disallow setting reloptions of the entire partition
+			 * hierarchy, if some child tables have different access method than the
+			 * root. We check it here so that we can print pretty error message.
+			 */
+			if ((cmd->subtype == AT_SetRelOptions || cmd->subtype == AT_ReplaceRelOptions) 
+					&& rel->rd_rel->relam != childrel->rd_rel->relam)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+						 errmsg("cannot alter reloptions for \"%s\" because one of the "
+						        "child tables \"%s\" has different access method",
+								RelationGetRelationName(rel),
+								RelationGetRelationName(childrel)),
+						 errhint("Alter tables individually or change the child's AM to be same as parent.")));
+			
 			CheckTableNotInUse(childrel, "ALTER TABLE");
 			ATPrepCmd(wqueue, childrel, cmd, false, true, lockmode);
 			relation_close(childrel, NoLock);
@@ -7380,13 +7554,14 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	enc = transformColumnEncoding(rel, list_make1(colDef), 
 					NULL /* COLUMN ENCODING clauses is only for CREATE TABLE */, 
 					NULL /* withOptions */,
-					false /* rootpartition */, 
+					NULL /* parent encodings */,
+					false /* explicitOnly */,
 					!RelationIsAoCols(rel) /* errorOnEncodingClause */);
 	/* 
 	 * Store the encoding clause for AO/CO tables.
 	 */
 	if (RelationIsAoCols(rel))
-		AddRelationAttributeEncodings(rel, enc);
+		AddRelationAttributeEncodings(myrelid, enc);
 
 	/* MPP-6929: metadata tracking */
 	if ((Gp_role == GP_ROLE_DISPATCH) && MetaTrackValidKindNsp(rel->rd_rel))
@@ -7425,13 +7600,11 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	 * We have to do it while processing the root partition because that's the
 	 * only level where the `ADD COLUMN` subcommands are populated.
 	 *
-	 * GPDB_12_MERGE_FIXME: Given now wqueue gets dispatched from QD to QE, no
-	 * need to perform this step on QE. Only need to execute this block of
-	 * code on QD and QE will get the information to perform optimized rewrite
-	 * for CO or not. Leaving fixme here as CO code is not working currently,
-	 * hence hard to validate if works correctly or not.
+	 * QD will dispatch wqueue and the QE will get all the info
+	 * to perform the column optimized rewrite.
+	 * So, we only need to execute this block on QD.
 	 */
-	if (!recursing && (tab->relkind == RELKIND_PARTITIONED_TABLE || tab->relkind == RELKIND_RELATION))
+	if (!recursing && (tab->relkind == RELKIND_PARTITIONED_TABLE || tab->relkind == RELKIND_RELATION) && Gp_role != GP_ROLE_EXECUTE)
 	{
 		bool	aocs_write_new_columns_only;
 		/*
@@ -7454,17 +7627,12 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			 * We have acquired lockmode on the root and first-level partitions
 			 * already. This leaves the deeper subpartitions unlocked, but no
 			 * operations can drop (or alter) those relations without locking
-			 * through the root. Note that find_all_inheritors() also includes
-			 * the root partition in the returned list.
-			 *
-			 * GPDB_12_MERGE_FIXME: we used to have NoLock here, but that caused
-			 * assertion failures in the regression tests:
-			 *
-			 * FATAL:  Unexpected internal error (relation.c:74)
-			 * DETAIL:  FailedAssertion("!(lockmode != 0 || (Mode == BootstrapProcessing) || CheckRelationLockedByMe(r, 1, 1))", File: "relation.c", Line: 74)
-			 *
-			 * so use AccessShareLock instead. Was it important that we used
-			 * NoLock here?
+			 * through the root. But we still lock them to meet the upstream 
+			 * expecation in relation_open that all callers should have acquired
+			 * a lock on the table except in bootstrap mode.
+
+			 * Note that find_all_inheritors() also includes the root partition 
+			 * in the returned list.
 			 */
 			List *all_inheritors = find_all_inheritors(tab->relid, AccessShareLock, NULL);
 			ListCell *lc;
@@ -7598,6 +7766,53 @@ add_column_collation_dependency(Oid relid, int32 attnum, Oid collid)
 		referenced.objectId = collid;
 		referenced.objectSubId = 0;
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+	}
+}
+
+/*
+ * ALTER TABLE ... ALTER COLUMN a SET ENCODING (...)
+ *
+ * Update pg_attribute_encoding with the given encoding options.
+ * Normally this will need a table rewrite, except when
+ * (1) the table is a partitioned one,
+ * or
+ * (2) the encoding option isn't really changed (they are the same as the given ones).
+ */
+static void
+ATExecSetColumnEncoding(AlteredTableInfo *tab, Relation rel, AlterTableCmd *cmd)
+{
+	ColumnReferenceStorageDirective *new_crsd;
+	bool is_updated;
+
+	if (OidIsValid(tab->newAccessMethod))
+	{
+		if (tab->newAccessMethod != AO_COLUMN_TABLE_AM_OID)
+			ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+				errmsg("ALTER COLUMN SET ENCODING operation is only applicable to AOCO tables"),
+				errdetail("New access method for \"%s\" is not AOCO",
+						  RelationGetRelationName(rel))));
+	}
+	else if (rel->rd_rel->relam != AO_COLUMN_TABLE_AM_OID)
+		ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+			errmsg("ALTER COLUMN SET ENCODING operation is only applicable to AOCO tables"),
+			errdetail("\"%s\" is not an AOCO table",
+					  RelationGetRelationName(rel))));
+
+
+	if (!tab->new_crsds) /* first iteration */
+		tab->new_crsds = rel_get_column_encodings(rel);
+
+	new_crsd = (ColumnReferenceStorageDirective *) cmd->def;
+	is_updated = updateEncodingList(tab->new_crsds, new_crsd);
+
+	if (is_updated)
+	{
+		if (rel->rd_rel->relkind == RELKIND_RELATION)
+			tab->rewrite = AT_REWRITE_COLUMN_REWRITE;
+		else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+			UpdateAttributeEncodings(rel->rd_id, tab->new_crsds);
+		else
+			Assert(false); //cannot reach here
 	}
 }
 
@@ -8866,13 +9081,6 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 
 	/* The IndexStmt has already been through transformIndexStmt */
 	Assert(stmt->transformed);
-
-	/* The index should already be built if we are a QE */
-	/* GPDB_12_MERGE_FIXME: it doesn't seem to work that way anymore. */
-#if 0
-	if (Gp_role == GP_ROLE_EXECUTE)
-		return InvalidObjectAddress;
-#endif
 
 	/* suppress schema rights check when rebuilding existing index */
 	check_rights = !is_rebuild;
@@ -14018,6 +14226,28 @@ ATExecDropCluster(Relation rel, LOCKMODE lockmode)
 }
 
 /*
+ * Preparation phase for SET ACCESS METHOD
+ *
+ * Check that access method exists.  If it is the same as the table's current
+ * access method, it is a no-op.  Otherwise, a table rewrite is necessary.
+ */
+static void
+ATPrepSetAccessMethod(AlteredTableInfo *tab, Relation rel, const char *amname)
+{
+	Oid			amoid;
+
+	/* Check that the table access method exists */
+	amoid = get_table_am_oid(amname, false);
+
+	if (rel->rd_rel->relam == amoid)
+		return;
+
+	/* Save info for Phase 3 to do the real work */
+	tab->rewrite |= AT_REWRITE_ACCESS_METHOD;
+	tab->newAccessMethod = amoid;
+}
+
+/*
  * ALTER TABLE SET TABLESPACE
  */
 static void
@@ -14049,10 +14279,14 @@ ATPrepSetTableSpace(AlteredTableInfo *tab, Relation rel, const char *tablespacen
 
 /*
  * Set, reset, or replace reloptions.
+ *
+ * GPDB specific arguments: 
+ * 	aoopt_changed: whether any AO storage options have been changed in this function.
+ * 	newam: the new AM if we will change the table AM. It's InvalidOid if no change is needed.
  */
 static void
 ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
-					LOCKMODE lockmode)
+					bool *aoopt_changed, Oid newam, LOCKMODE lockmode)
 {
 	Oid			relid;
 	Relation	pgclass;
@@ -14065,6 +14299,10 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 	bool		repl_null[Natts_pg_class];
 	bool		repl_repl[Natts_pg_class];
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+	Oid 		tableam;
+
+	/* Get the new table AM if applicable. Otherwise get the one from the reltion. */
+	tableam = (newam != InvalidOid) ? newam : rel->rd_rel->relam;
 
 	if (defList == NIL && operation != AT_ReplaceRelOptions)
 		return;					/* nothing to do */
@@ -14080,8 +14318,8 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 	if (operation == AT_ReplaceRelOptions)
 	{
 		/*
-		 * If we're supposed to replace the reloptions list, we just pretend
-		 * there were none before.
+		 * If we're supposed to replace the reloptions list, we just 
+		 * pretend there were none before.
 		 */
 		datum = (Datum) 0;
 		isnull = true;
@@ -14093,21 +14331,6 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 								&isnull);
 	}
 
-	/*
-	 * Disallow all AO options.  ALTER TABLE SET ... command does not rewrite a
-	 * table.  Setting AO options (e.g. setting appendonly=true when it's
-	 * currently unset) involves rewrite of the table and is handled using the
-	 * SET WITH variant of ALTER TABLE.
-	 *
-	 * GPDP_91_MERGE_FIXME: Is it possible to use the new reloptions format to
-	 * avoid replicating each AO reloption here?  How about introducing new
-	 * RELOPT_KIND_AO and RELOPT_KIND_AOCO to relopt_kind?  As of PostgreSQL v12,
-	 * RELOPT_KIND_APPENDOPTIMIZED is introduced and can be leveraged when
-	 * addressing this fixme.
-	 *
-	 * Future work: could convert from SET to SET WITH codepath which
-	 * can support additional reloption types
-	 */
 	if (defList != NIL)
 	{
 		ListCell   *cell;
@@ -14115,17 +14338,7 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 		foreach(cell, defList)
 		{
 			DefElem    *def = lfirst(cell);
-			int			kw_len = strlen(def->defname);
 
-			if (pg_strncasecmp(SOPT_APPENDONLY, def->defname, kw_len) == 0 ||
-				pg_strncasecmp(SOPT_BLOCKSIZE, def->defname, kw_len) == 0 ||
-				pg_strncasecmp(SOPT_COMPTYPE, def->defname, kw_len) == 0 ||
-				pg_strncasecmp(SOPT_COMPLEVEL, def->defname, kw_len) == 0 ||
-				pg_strncasecmp(SOPT_CHECKSUM, def->defname, kw_len) == 0)
-				ereport(ERROR,
-						(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						 errmsg("cannot SET reloption \"%s\"",
-								def->defname)));
 			/*
 			 * Autovacuum on user tables is not enabled in Greenplum.  Move on
 			 * with a warning.  The decision to not error out is in favor of
@@ -14155,13 +14368,24 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 		case RELKIND_AOSEGMENTS:
 		case RELKIND_AOBLOCKDIR:
 		case RELKIND_AOVISIMAP:
-			if (RelationIsAppendOptimized(rel))
-				ereport(ERROR,
-						(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-						 errmsg("altering reloptions for append only tables"
-								" is not permitted")));
+			if (IsAccessMethodAO(tableam))
+			{
+				StdRdOptions *stdRdOptions = (StdRdOptions *) default_reloptions(newOptions,
+																				 true,
+																				 RELOPT_KIND_APPENDOPTIMIZED);
+				validateAppendOnlyRelOptions(stdRdOptions->blocksize,
+											 gp_safefswritesize,
+											 stdRdOptions->compresslevel,
+											 stdRdOptions->compresstype,
+											 stdRdOptions->checksum,
+											 tableam == AO_COLUMN_TABLE_AM_OID);
+				/* If reloptions will be changed, indicate so. */
+				if (aoopt_changed != NULL)
+					*aoopt_changed = !relOptionsEquals(datum, newOptions);
 
-			(void) heap_reloptions(rel->rd_rel->relkind, newOptions, true);
+			}
+			else
+				(void) heap_reloptions(rel->rd_rel->relkind, newOptions, true);
 			break;
 		case RELKIND_VIEW:
 			(void) view_reloptions(newOptions, true);
@@ -14501,6 +14725,64 @@ ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmode)
 }
 
 /*
+ * Special handling of ALTER TABLE SET ACCESS METHOD for relations with no
+ * storage that have an interest in preserving AM.
+ *
+ * Since these relations have no storage the access method can be updated with a
+ * simple metadata only operation.
+ */
+static void
+ATExecSetAccessMethodNoStorage(Relation rel, Oid newAccessMethod)
+{
+	Relation	pg_class;
+	Oid			relid;
+	Oid			oldrelam;
+	HeapTuple	tuple;
+
+	/*
+	 * Shouldn't be called on relations having storage; these are processed in
+	 * phase 3.
+	 */
+	Assert(!RELKIND_HAS_STORAGE(rel->rd_rel->relkind));
+
+	relid = RelationGetRelid(rel);
+
+	/* Pull the record for this relation and update it */
+	pg_class = table_open(RelationRelationId, RowExclusiveLock);
+
+	tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
+
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for relation %u", relid);
+
+	oldrelam = ((Form_pg_class) GETSTRUCT(tuple))->relam;
+	((Form_pg_class) GETSTRUCT(tuple))->relam = newAccessMethod;
+	CatalogTupleUpdate(pg_class, &tuple->t_self, tuple);
+
+	/*
+	 * Record dependency on AM.  This is only required for relations
+	 * that have no physical storage.
+	 */
+	changeDependencyFor(RelationRelationId, RelationGetRelid(rel),
+			AccessMethodRelationId, oldrelam,
+			newAccessMethod);
+
+	InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), 0);
+
+	heap_freetuple(tuple);
+	table_close(pg_class, RowExclusiveLock);
+
+	/*
+	 * Remove the pg_attribute_encoding entries when we are changing the AOCO table to some other AM.
+	 */
+	if (oldrelam == AO_COLUMN_TABLE_AM_OID)
+		RemoveAttributeEncodingsByRelid(relid);
+
+	/* Make sure the relam change is visible */
+	CommandCounterIncrement();
+}
+
+/*
  * Special handling of ALTER TABLE SET TABLESPACE for relations with no
  * storage that have an interest in preserving tablespace.
  *
@@ -14792,7 +15074,7 @@ index_copy_data(Relation rel, RelFileNode newrnode)
 			if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
 				(rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED &&
 				 forkNum == INIT_FORKNUM))
-				log_smgrcreate(&newrnode, forkNum);
+				log_smgrcreate(&newrnode, forkNum, smgr_which);
 			RelationCopyStorage(rel->rd_smgr, dstrel, forkNum,
 								rel->rd_rel->relpersistence);
 		}
@@ -15896,6 +16178,39 @@ get_rel_opts(Relation rel)
 	return newOptions;
 }
 
+/*
+ * GPDB: Convenience function to clear the pg_class.reloptions field for a given relation.
+ */
+static void
+clear_rel_opts(Relation rel)
+{
+	Datum           val[Natts_pg_class] = {0};
+	bool            null[Natts_pg_class] = {0};
+	bool            repl[Natts_pg_class] = {0};
+	Relation 	classrel;
+	HeapTuple 	tup;
+
+	classrel = table_open(RelationRelationId, RowExclusiveLock);
+
+	tup = SearchSysCacheCopy1(RELOID, RelationGetRelid(rel));
+	if (!HeapTupleIsValid(tup))
+		elog(ERROR, "cache lookup failed for relation %u", RelationGetRelid(rel));
+
+	val[Anum_pg_class_reloptions - 1] = (Datum) 0;
+	null[Anum_pg_class_reloptions - 1] = true;
+	repl[Anum_pg_class_reloptions - 1] = true;
+
+	tup = heap_modify_tuple(tup, RelationGetDescr(classrel),
+								val, null, repl);
+	CatalogTupleUpdate(classrel, &tup->t_self, tup);
+
+	heap_freetuple(tup);
+
+	table_close(classrel, RowExclusiveLock);
+
+	CommandCounterIncrement(); 
+}
+
 static RangeVar *
 make_temp_table_name(Relation rel, BackendId id)
 {
@@ -15984,49 +16299,30 @@ prebuild_temp_table(Relation rel, RangeVar *tmpname, DistributedBy *distro,
 		cs->ownerid = rel->rd_rel->relowner;
 		cs->tablespacename = get_tablespace_name(rel->rd_rel->reltablespace);
 		cs->buildAoBlkdir = false;
+		cs->gp_style_alter_part = false;
 
 		if (isTmpTableAo &&
 			rel->rd_rel->relhasindex)
 			cs->buildAoBlkdir = true;
 
-		/* 
-		 * For AO/CO tables, need to remove table level compression settings 
-		 * for the AO_COLUMN case since they're set at the column level.
-		 */
-		if (RelationIsAoCols(rel))
+		cs->options = opts;
+
+		if (RelationIsAoRows(rel))
 		{
-			ListCell *lc;
-
-			foreach(lc, opts)
-			{
-				DefElem *de = lfirst(lc);
-
-				if (!useExistingColumnAttributes || 
-						!de->defname || 
-						!is_storage_encoding_directive(de->defname))
-					cs->options = lappend(cs->options, de);
-			}
-			if (useExistingColumnAttributes)
-				col_encs = RelationGetUntransformedAttributeOptions(rel);
+			/*
+			* In order to avoid being affected by the GUC of gp_default_storage_options,
+			* we should re-build storage options from original table.
+			*
+			* The reason is that when we use the default parameters to create a table,
+			* the configuration will not be written to pg_class.reloptions, and then if
+			* gp_default_storage_options is modified, the newly created table will be
+			* inconsistent with the original table.
+			*/
+			cs->options = build_ao_rel_storage_opts(cs->options, rel);
 		}
-		else
-		{
-			cs->options = opts;
 
-			if (RelationIsAoRows(rel))
-			{
-				/*
-				 * In order to avoid being affected by the GUC of gp_default_storage_options,
-				 * we should re-build storage options from original table.
-				 *
-				 * The reason is that when we use the default parameters to create a table,
-				 * the configuration will not be written to pg_class.reloptions, and then if
-				 * gp_default_storage_options is modified, the newly created table will be
-				 * inconsistent with the original table.
-				 */
-				cs->options = build_ao_rel_storage_opts(cs->options, rel);
-			}
-		}
+		if (RelationIsAoCols(rel) && useExistingColumnAttributes)
+			col_encs = RelationGetUntransformedAttributeOptions(rel);
 
 		for (attno = 0; attno < tupdesc->natts; attno++)
 		{
@@ -16684,6 +16980,12 @@ ATExecSetDistributedBy(Relation rel, Node *node, AlterTableCmd *cmd)
 
 			lwith = nlist;
 		}
+		/* External tables cannot really be re-organized. Error out if we are instructed to do so.*/
+		if (force_reorg && rel_is_external_table(RelationGetRelid(rel)))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot reorganize external table \"%s\"",
+							RelationGetRelationName(rel))));
 
 		if (ldistro)
 			change_policy = true;
@@ -16916,7 +17218,8 @@ ATExecSetDistributedBy(Relation rel, Node *node, AlterTableCmd *cmd)
 		{
 			need_reorg = true;
 		}
-		else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
+			rel_is_external_table(RelationGetRelid(rel)))
 			need_reorg = false;
 		else
 			elog(ERROR, "unexpected relkind '%c'", rel->rd_rel->relkind);

@@ -97,7 +97,6 @@ extern PGDLLIMPORT volatile int32 CritSectionCount;
 
 /* in tcop/postgres.c */
 extern void ProcessInterrupts(const char* filename, int lineno);
-extern bool CancelRequested();
 
 /* Hook get notified when QueryCancelPending or ProcDiePending is raised */
 typedef void (*cancel_pending_hook_type) (void);
@@ -128,6 +127,15 @@ BackoffBackendTick(void)
 		/* Enough time has passed. Perform backoff. */
 		BackoffBackendTickExpired();
 	}
+}
+
+/*
+ * Whether request on cancel or termination have arrived?
+ */
+static inline bool
+CancelRequested()
+{
+	return InterruptPending && (ProcDiePending || QueryCancelPending);
 }
 
 #ifndef WIN32
@@ -340,6 +348,7 @@ extern double vacuum_cleanup_index_scale_factor;
 
 extern int gp_vmem_protect_limit;
 extern int gp_vmem_protect_gang_cache_limit;
+extern int gp_max_parallel_cursors;
 
 /* in tcop/postgres.c */
 

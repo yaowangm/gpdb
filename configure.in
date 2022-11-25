@@ -220,13 +220,6 @@ PGAC_ARG_BOOL(enable, gpfdist, yes,
 AC_SUBST(enable_gpfdist)
 
 #
-# pxf
-#
-PGAC_ARG_BOOL(enable, pxf, yes,
-             [do not build pxf])
-AC_SUBST(enable_pxf)
-
-#
 # include debug extensions in gpcontrib
 #
 PGAC_ARG_BOOL(enable, debug-extensions, yes,
@@ -297,7 +290,7 @@ AC_SUBST(enable_tap_tests)
 # Block size
 #
 AC_MSG_CHECKING([for block size])
-PGAC_ARG_REQ(with, blocksize, [BLOCKSIZE], [set table block size in kB [8]],
+PGAC_ARG_REQ(with, blocksize, [BLOCKSIZE], [set table block size in kB [32]],
              [blocksize=$withval],
              [blocksize=32])
 case ${blocksize} in
@@ -361,7 +354,7 @@ AC_DEFINE_UNQUOTED([RELSEG_SIZE], ${RELSEG_SIZE}, [
 # WAL block size
 #
 AC_MSG_CHECKING([for WAL block size])
-PGAC_ARG_REQ(with, wal-blocksize, [BLOCKSIZE], [set WAL block size in kB [8]],
+PGAC_ARG_REQ(with, wal-blocksize, [BLOCKSIZE], [set WAL block size in kB [32]],
              [wal_blocksize=$withval],
              [wal_blocksize=32])
 case ${wal_blocksize} in
@@ -896,6 +889,15 @@ AC_MSG_RESULT([$with_python])
 AC_SUBST(with_python)
 
 #
+# Optionally build Python modules for gpMgmt
+#
+AC_MSG_CHECKING([whether to build Python modules for gpMgmt])
+PGAC_ARG_BOOL(with, pythonsrc-ext, no, [build Python modules for gpMgmt])
+AC_MSG_RESULT([$with_pythonsrc_ext])
+AC_SUBST(with_pythonsrc_ext)
+
+
+#
 # GSSAPI
 #
 AC_MSG_CHECKING([whether to build with GSSAPI support])
@@ -1132,15 +1134,11 @@ PGAC_ARG_BOOL(with, rt, yes,
 AC_SUBST(with_rt)
 
 #
-# libcurl. Used for external table support and the PXF extension
+# libcurl. Used for external table support
 #
 PGAC_ARG_BOOL(with, libcurl, yes,
               [do not use libcurl])
 AC_SUBST(with_libcurl)
-
-if test "$with_libcurl" = "no" && test "$enable_pxf" = "yes"; then
-  AC_MSG_ERROR([libcurl is required by PXF])
-fi
 
 if test "$with_libcurl" = "no" && test "$enable_gpcloud" = "yes"; then
   AC_MSG_ERROR([libcurl is required by gpcloud])

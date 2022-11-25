@@ -197,11 +197,6 @@ private:
 		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
 		CParseHandlerBase *parse_handler_root);
 
-	// construct an MD trigger parse handler
-	static CParseHandlerBase *CreateMDTriggerParseHandler(
-		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
-		CParseHandlerBase *parse_handler_root);
-
 	// construct an MD cast parse handler
 	static CParseHandlerBase *CreateMDCastParseHandler(
 		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
@@ -266,6 +261,11 @@ private:
 		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
 		CParseHandlerBase *parse_handler_root);
 
+	// construct a dynamic bitmap table scan parse handler
+	static CParseHandlerBase *CreateDynBitmapTableScanParseHandler(
+		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
+		CParseHandlerBase *parse_handler_root);
+
 	// construct an external scan parse handler
 	static CParseHandlerBase *CreateExternalScanParseHandler(
 		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
@@ -308,6 +308,16 @@ private:
 
 	// construct a materialize parse handler
 	static CParseHandlerBase *CreateMaterializeParseHandler(
+		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
+		CParseHandlerBase *parse_handler_root);
+
+	// construct a dynamic table scan parse handler
+	static CParseHandlerBase *CreateDTSParseHandler(
+		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
+		CParseHandlerBase *parse_handler_root);
+
+	// construct a dynamic index scan parse handler
+	static CParseHandlerBase *CreateDynamicIdxScanParseHandler(
 		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
 		CParseHandlerBase *parse_handler_root);
 
@@ -800,11 +810,6 @@ private:
 
 	// construct a physical split parse handler
 	static CParseHandlerBase *CreatePhysicalSplitParseHandler(
-		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
-		CParseHandlerBase *parse_handler_root);
-
-	// construct a physical row trigger parse handler
-	static CParseHandlerBase *CreatePhysicalRowTriggerParseHandler(
 		CMemoryPool *mp, CParseHandlerManager *parse_handler_mgr,
 		CParseHandlerBase *parse_handler_root);
 

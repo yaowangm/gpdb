@@ -471,6 +471,14 @@ _outAlterDomainStmt(StringInfo str, AlterDomainStmt *node)
 }
 
 static void
+_outAlterDatabaseStmt(StringInfo str, AlterDatabaseStmt *node)
+{
+	WRITE_NODE_TYPE("ALTERDATABASESTMT");
+	WRITE_STRING_FIELD(dbname);
+	WRITE_NODE_FIELD(options);
+}
+
+static void
 _outAlterDefaultPrivilegesStmt(StringInfo str, AlterDefaultPrivilegesStmt *node)
 {
 	WRITE_NODE_TYPE("ALTERDEFAULTPRIVILEGESSTMT");
@@ -977,6 +985,9 @@ _outNode(StringInfo str, void *obj)
 			case T_SeqScan:
 				_outSeqScan(str, obj);
 				break;
+			case T_DynamicSeqScan:
+				_outDynamicSeqScan(str, obj);
+				break;
 			case T_SampleScan:
 				_outSampleScan(str, obj);
 				break;
@@ -1004,11 +1015,20 @@ _outNode(StringInfo str, void *obj)
 			case T_IndexOnlyScan:
 				_outIndexOnlyScan(str, obj);
 				break;
+			case T_DynamicIndexScan:
+				_outDynamicIndexScan(str, obj);
+				break;
 			case T_BitmapIndexScan:
 				_outBitmapIndexScan(str, obj);
 				break;
+			case T_DynamicBitmapIndexScan:
+				_outDynamicBitmapIndexScan(str, obj);
+				break;
 			case T_BitmapHeapScan:
 				_outBitmapHeapScan(str, obj);
+				break;
+			case T_DynamicBitmapHeapScan:
+				_outDynamicBitmapHeapScan(str, obj);
 				break;
 			case T_TidScan:
 				_outTidScan(str, obj);
@@ -1465,6 +1485,9 @@ _outNode(StringInfo str, void *obj)
 				break;
 			case T_CreateDomainStmt:
 				_outCreateDomainStmt(str, obj);
+				break;
+			case T_AlterDatabaseStmt:
+				_outAlterDatabaseStmt(str, obj);
 				break;
 			case T_AlterDomainStmt:
 				_outAlterDomainStmt(str, obj);

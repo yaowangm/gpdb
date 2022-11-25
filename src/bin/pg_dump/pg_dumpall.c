@@ -61,8 +61,6 @@ static void executeCommand(PGconn *conn, const char *query);
 static void expand_dbname_patterns(PGconn *conn, SimpleStringList *patterns,
 								   SimpleStringList *names);
 
-static void error_unsupported_server_version(PGconn *conn) pg_attribute_noreturn();
-
 static char pg_dump_bin[MAXPGPATH];
 static const char *progname;
 static PQExpBuffer pgdumpopts;
@@ -578,7 +576,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Force quoting of all identifiers if requested. */
-	if (quote_all_identifiers && server_version >= 80300)
+	if (quote_all_identifiers)
 		executeCommand(conn, "SET quote_all_identifiers = true");
 
 	fprintf(OPF,"--\n-- Greenplum Database cluster dump\n--\n\n");
@@ -820,8 +818,10 @@ dumpResGroups(PGconn *conn)
 	 */
 	fprintf(OPF, "ALTER RESOURCE GROUP \"admin_group\" SET cpu_rate_limit 1;\n");
 	fprintf(OPF, "ALTER RESOURCE GROUP \"default_group\" SET cpu_rate_limit 1;\n");
+	fprintf(OPF, "ALTER RESOURCE GROUP \"system_group\" SET cpu_rate_limit 1;\n");
 	fprintf(OPF, "ALTER RESOURCE GROUP \"admin_group\" SET memory_limit 1;\n");
 	fprintf(OPF, "ALTER RESOURCE GROUP \"default_group\" SET memory_limit 1;\n");
+	fprintf(OPF, "ALTER RESOURCE GROUP \"system_group\" SET memory_limit 1;\n");
 
 	for (i = 0; i < PQntuples(res); i++)
 	{
@@ -845,7 +845,8 @@ dumpResGroups(PGconn *conn)
 
 		resetPQExpBuffer(buf);
 
-		if (0 == strcmp(groupname, "default_group") || 0 == strcmp(groupname, "admin_group"))
+		if (0 == strcmp(groupname, "default_group") || 0 == strcmp(groupname, "admin_group")
+				|| 0 == strcmp(groupname, "system_group"))
 		{
 			/*
 			 * We can't emit CREATE statements for the built-in groups as they
@@ -950,22 +951,15 @@ dumpResQueues(PGconn *conn)
 					  "3 as ord FROM pg_resqueue "
 					  "UNION "
 					  "SELECT oid, rsqname, 'ignorecostlimit' as resname, "
-					  "%s as ressetting, "
+					  "rsqignorecostlimit::text as ressetting, "
 					  "4 as ord FROM pg_resqueue "
-					  "%s"
-					  "order by rsqname,  ord",
-					  (server_version >= 80205 ?
-					   "rsqignorecostlimit::text"
-					   : "0 AS"),
-					  (server_version >= 80214 ?
-					   "UNION "
-					   "SELECT rq.oid, rq.rsqname, rt.resname, rc.ressetting, "
-					   "rt.restypid as ord FROM "
-					   "pg_resqueue rq,  pg_resourcetype rt, "
-					   "pg_resqueuecapability rc WHERE "
-					   "rq.oid=rc.resqueueid and rc.restypid = rt.restypid "
-					   : "")
-		);
+					  "UNION "
+						  "SELECT rq.oid, rq.rsqname, rt.resname, rc.ressetting, "
+						  "rt.restypid as ord FROM "
+						  "pg_resqueue rq,  pg_resourcetype rt, "
+						  "pg_resqueuecapability rc WHERE "
+						  "rq.oid=rc.resqueueid and rc.restypid = rt.restypid "
+						  "order by rsqname,  ord");
 
 	res = executeQuery(conn, buf->data);
 
@@ -1238,7 +1232,7 @@ dumpRoles(PGconn *conn)
 						  " %s %s %s %s"
 						  "FROM %s "
 						  "ORDER BY 2", role_catalog, resq_col, resgroup_col, extauth_col, hdfs_col, role_catalog);
-	else if (server_version >= 80200)
+	else
 		printfPQExpBuffer(buf,
 						  "SELECT oid, rolname, rolsuper, rolinherit, "
 						  "rolcreaterole, rolcreatedb, rolcatupdate, "
@@ -1250,51 +1244,6 @@ dumpRoles(PGconn *conn)
 						  " %s %s %s %s"
 						  "FROM %s "
 						  "ORDER BY 2", role_catalog, resq_col, resgroup_col, extauth_col, hdfs_col, role_catalog);
-	else if (server_version >= 80100)
-		printfPQExpBuffer(buf,
-						  "SELECT oid, rolname, rolsuper, rolinherit, "
-						  "rolcreaterole, rolcreatedb, "
-						  "rolcanlogin, rolconnlimit, rolpassword, "
-						  "rolvaliduntil, false as rolreplication, "
-						  "false as rolbypassrls, "
-						  "null as rolcomment, "
-						  "rolname = current_user AS is_current_user "
-						  "FROM %s "
-						  "ORDER BY 2", role_catalog);
-	else
-		printfPQExpBuffer(buf,
-						  "SELECT 0 as oid, usename as rolname, "
-						  "usesuper as rolsuper, "
-						  "true as rolinherit, "
-						  "usesuper as rolcreaterole, "
-						  "usecreatedb as rolcreatedb, "
-						  "true as rolcanlogin, "
-						  "-1 as rolconnlimit, "
-						  "passwd as rolpassword, "
-						  "valuntil as rolvaliduntil, "
-						  "false as rolreplication, "
-						  "false as rolbypassrls, "
-						  "null as rolcomment, "
-						  "usename = current_user AS is_current_user "
-						  "FROM pg_shadow "
-						  "UNION ALL "
-						  "SELECT 0 as oid, groname as rolname, "
-						  "false as rolsuper, "
-						  "true as rolinherit, "
-						  "false as rolcreaterole, "
-						  "false as rolcreatedb, "
-						  "false as rolcanlogin, "
-						  "-1 as rolconnlimit, "
-						  "null::text as rolpassword, "
-						  "null::timestamptz as rolvaliduntil, "
-						  "false as rolreplication, "
-						  "false as rolbypassrls, "
-						  "null as rolcomment, "
-						  "false AS is_current_user "
-						  "FROM pg_group "
-						  "WHERE NOT EXISTS (SELECT 1 FROM pg_shadow "
-						  " WHERE usename = groname) "
-						  "ORDER BY 2");
 
 	res = executeQuery(conn, buf->data);
 
@@ -1402,10 +1351,13 @@ dumpRoles(PGconn *conn)
 		else
 			appendPQExpBufferStr(buf, " NOREPLICATION");
 
-		if (strcmp(PQgetvalue(res, i, i_rolbypassrls), "t") == 0)
-			appendPQExpBufferStr(buf, " BYPASSRLS");
-		else
-			appendPQExpBufferStr(buf, " NOBYPASSRLS");
+		if (server_version >= 90600)
+		{
+			if (strcmp(PQgetvalue(res, i, i_rolbypassrls), "t") == 0)
+				appendPQExpBufferStr(buf, " BYPASSRLS");
+			else
+				appendPQExpBufferStr(buf, " NOBYPASSRLS");
+		}
 
 		if (strcmp(PQgetvalue(res, i, i_rolconnlimit), "-1") != 0)
 			appendPQExpBuffer(buf, " CONNECTION LIMIT %s",
@@ -1645,61 +1597,12 @@ dumpTablespaces(PGconn *conn)
 	 * [FIXME] the queries need to be slightly different if the backend isn't
 	 * Greenplum, and the dump format should vary depending on if the dump is
 	 * --gp-syntax or --no-gp-syntax.
-	 *
-	 * For the tablespace ACLs, as of 9.6, we extract both the positive (as
-	 * spcacl) and negative (as rspcacl) ACLs, relative to the default ACL for
-	 * tablespaces, which are then passed to buildACLCommands() below.
-	 *
-	 * See buildACLQueries() and buildACLCommands().
-	 *
-	 * The order in which privileges are in the ACL string (the order they
-	 * have been GRANT'd in, which the backend maintains) must be preserved to
-	 * ensure that GRANTs WITH GRANT OPTION and subsequent GRANTs based on
-	 * those are dumped in the correct order.
-	 *
-	 * Note that we do not support initial privileges (pg_init_privs) on
-	 * tablespaces, so this logic cannot make use of buildACLQueries().
 	 */
-	if (server_version < 80214)
-	{
-		/* Filespaces were introduced in GP 4.0 (server_version 8.2.14) */
-		return;
-	}
-
-	if (server_version >= 90600)
+	if (server_version >= 90200)
 		res = executeQuery(conn, "SELECT oid, spcname, "
 						   "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
 						   "pg_catalog.pg_tablespace_location(oid), "
-						   "(SELECT array_agg(acl ORDER BY row_n) FROM "
-						   "  (SELECT acl, row_n FROM "
-						   "     unnest(coalesce(spcacl,acldefault('t',spcowner))) "
-						   "     WITH ORDINALITY AS perm(acl,row_n) "
-						   "   WHERE NOT EXISTS ( "
-						   "     SELECT 1 "
-						   "     FROM unnest(acldefault('t',spcowner)) "
-						   "       AS init(init_acl) "
-						   "     WHERE acl = init_acl)) AS spcacls) "
-						   " AS spcacl, "
-						   "(SELECT array_agg(acl ORDER BY row_n) FROM "
-						   "  (SELECT acl, row_n FROM "
-						   "     unnest(acldefault('t',spcowner)) "
-						   "     WITH ORDINALITY AS initp(acl,row_n) "
-						   "   WHERE NOT EXISTS ( "
-						   "     SELECT 1 "
-						   "     FROM unnest(coalesce(spcacl,acldefault('t',spcowner))) "
-						   "       AS permp(orig_acl) "
-						   "     WHERE acl = orig_acl)) AS rspcacls) "
-						   " AS rspcacl, "
-						   "array_to_string(spcoptions, ', '),"
-						   "pg_catalog.shobj_description(oid, 'pg_tablespace') "
-						   "FROM pg_catalog.pg_tablespace "
-						   "WHERE spcname !~ '^pg_' "
-						   "ORDER BY 1");
-	else if (server_version >= 90200)
-		res = executeQuery(conn, "SELECT oid, spcname, "
-						   "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
-						   "pg_catalog.pg_tablespace_location(oid), "
-						   "spcacl, '' as rspcacl, "
+						   "spcacl, acldefault('t', spcowner) AS acldefault, "
 						   "array_to_string(spcoptions, ', '),"
 						   "pg_catalog.shobj_description(oid, 'pg_tablespace') "
 						   "FROM pg_catalog.pg_tablespace "
@@ -1708,31 +1611,20 @@ dumpTablespaces(PGconn *conn)
 	else if (server_version >= 90000)
 		res = executeQuery(conn, "SELECT oid, spcname, "
 						   "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
-						   "spclocation, spcacl, '' as rspcacl, "
+						   "spclocation, spcacl, NULL AS acldefault, "
 						   "array_to_string(spcoptions, ', '),"
 						   "pg_catalog.shobj_description(oid, 'pg_tablespace') "
 						   "FROM pg_catalog.pg_tablespace "
 						   "WHERE spcname !~ '^pg_' "
 						   "ORDER BY 1");
-	else if (server_version >= 80200)
+	else
 		res = executeQuery(conn, "SELECT oid, spcname, "
 						   "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
-						   "spclocation, spcacl, '' as rspcacl, null, "
+						   "spclocation, spcacl, NULL AS acldefault, null, "
 						   "pg_catalog.shobj_description(oid, 'pg_tablespace') "
 						   "FROM pg_catalog.pg_tablespace "
 						   "WHERE spcname !~ '^pg_' "
 						   "ORDER BY 1");
-	else
-	{
-		error_unsupported_server_version(conn);
-		res = executeQuery(conn, "SELECT oid, spcname, "
-						   "pg_catalog.pg_get_userbyid(spcowner) AS spcowner, "
-						   "spclocation, spcacl, '' as rspcacl, "
-						   "null, null "
-						   "FROM pg_catalog.pg_tablespace "
-						   "WHERE spcname !~ '^pg_' "
-						   "ORDER BY 1");
-	}
 
 	if (PQntuples(res) > 0)
 		fprintf(OPF, "--\n-- Tablespaces\n--\n\n");
@@ -1745,7 +1637,7 @@ dumpTablespaces(PGconn *conn)
 		char	   *spcowner = PQgetvalue(res, i, 2);
 		char	   *spclocation = PQgetvalue(res, i, 3);
 		char	   *spcacl = PQgetvalue(res, i, 4);
-		char	   *rspcacl = PQgetvalue(res, i, 5);
+		char	   *acldefault = PQgetvalue(res, i, 5);
 		char	   *spcoptions = PQgetvalue(res, i, 6);
 		char	   *spccomment = PQgetvalue(res, i, 7);
 		char	   *fspcname;
@@ -1764,9 +1656,11 @@ dumpTablespaces(PGconn *conn)
 			appendPQExpBuffer(buf, "ALTER TABLESPACE %s SET (%s);\n",
 							  fspcname, spcoptions);
 
+		/* tablespaces can't have initprivs */
+
 		if (!skip_acls &&
 			!buildACLCommands(fspcname, NULL, NULL, "TABLESPACE",
-							  spcacl, rspcacl,
+							  spcacl, acldefault,
 							  spcowner, "", server_version, buf))
 		{
 			pg_log_error("could not parse ACL list (%s) for tablespace \"%s\"",
@@ -2107,7 +2001,7 @@ buildShSecLabels(PGconn *conn, const char *catalog_name, Oid objectId,
 	PQExpBuffer sql = createPQExpBuffer();
 	PGresult   *res;
 
-	buildShSecLabelQuery(conn, catalog_name, objectId, sql);
+	buildShSecLabelQuery(catalog_name, objectId, sql);
 	res = executeQuery(conn, sql->data);
 	emitShSecLabels(conn, res, buffer, objtype, objname);
 
@@ -2310,11 +2204,11 @@ connectDatabase(const char *dbname, const char *connection_string,
 	my_version = PG_VERSION_NUM;
 
 	/*
-	 * We allow the server to be back to 8.0, and up to any minor release of
+	 * We allow the server to be back to 8.3, and up to any minor release of
 	 * our own major version.  (See also version check in pg_dump.c.)
 	 */
 	if (my_version != server_version
-		&& (server_version < 80200 ||		/* we can handle back to 8.2 */
+		&& (server_version < GPDB5_MAJOR_PGVERSION ||		/* we can handle back to 8.3 */
 			(server_version / 100) > (my_version / 100)))
 	{
 		pg_log_error("server version: %s; %s version: %s",
@@ -2424,28 +2318,4 @@ dumpTimestamp(const char *msg)
 
 	if (strftime(buf, sizeof(buf), PGDUMP_STRFTIME_FMT, localtime(&now)) != 0)
 		fprintf(OPF, "-- %s %s\n\n", msg, buf);
-}
-
-/*
- * This GPDB-specific function is copied (in spirit) from pg_dump.c.
- *
- * PostgreSQL's pg_dumpall supports very old server versions, but in GPDB, we
- * only need to go back to 8.2-derived GPDB versions (4.something?). A lot of
- * that code to deal with old versions has been removed. But in order to not
- * change the formatting of the surrounding code, and to make it more clear
- * when reading a diff against the corresponding PostgreSQL version of
- * pg_dumpall, calls to this function has been left in place of the removed
- * code.
- *
- * This function should never actually be used, because check that the server
- * version is new enough at the beginning of pg_dumpall. This is just for
- * documentation purposes, to show were upstream code has been removed, and
- * to avoid those diffs or merge conflicts with upstream.
- */
-static void
-error_unsupported_server_version(PGconn *conn)
-{
-	fprintf(stderr, _("unexpected server version %d\n"), server_version);
-	PQfinish(conn);
-	exit(1);
 }

@@ -24,6 +24,7 @@
 #include "access/appendonly_compaction.h"
 #include "access/appendonlywriter.h"
 #include "catalog/catalog.h"
+#include "catalog/gp_fastsequence.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_appendonly.h"
 #include "cdb/cdbaocsam.h"
@@ -70,7 +71,7 @@ AOCSCompaction_DropSegmentFile(Relation aorel, int segno)
 			   "segno %d",
 			   pseudoSegNo);
 
-		fd = OpenAOSegmentFile(aorel, filenamepath, 0);
+		fd = OpenAOSegmentFile(filenamepath, 0);
 		if (fd >= 0)
 		{
 			TruncateAOSegmentFile(fd, aorel, pseudoSegNo, 0);
@@ -106,8 +107,6 @@ AOCSSegmentFileTruncateToEOF(Relation aorel, int segno, AOCSVPInfo *vpinfo)
 
 	Assert(RelationIsAoCols(aorel));
 
-	relname = RelationGetRelationName(aorel);
-
 	for (j = 0; j < vpinfo->nEntry; ++j)
 	{
 		int64		segeof;
@@ -133,7 +132,7 @@ AOCSSegmentFileTruncateToEOF(Relation aorel, int segno, AOCSVPInfo *vpinfo)
 			   fileSegNo,
 			   segeof);
 
-		fd = OpenAOSegmentFile(aorel, filenamepath, segeof);
+		fd = OpenAOSegmentFile(filenamepath, segeof);
 		if (fd >= 0)
 		{
 			TruncateAOSegmentFile(fd, aorel, fileSegNo, segeof);
@@ -217,11 +216,9 @@ AOCSSegmentFileFullCompaction(Relation aorel,
 	TupleDesc	tupDesc;
 	TupleTableSlot *slot;
 	int			compact_segno;
-	int64		movedTupleCount = 0;
 	ResultRelInfo *resultRelInfo;
 	MemTupleBinding *mt_bind;
 	EState	   *estate;
-	AOTupleId  *aoTupleId;
 	int64		tupleCount = 0;
 	int64		tuplePerPage = INT_MAX;
 
@@ -270,24 +267,27 @@ AOCSSegmentFileFullCompaction(Relation aorel,
 	estate->es_num_result_relations = 1;
 	estate->es_result_relation_info = resultRelInfo;
 
+	/*
+	 * We don't want uniqueness checks to be performed while "insert"ing tuples
+	 * to a destination segfile during AOCSMoveTuple(). This is to ensure that
+	 * we can avoid spurious conflicts between the moved tuple and the original
+	 * tuple.
+	 */
+	estate->gp_bypass_unique_check = true;
+
 	while (aocs_getnext(scanDesc, ForwardScanDirection, slot))
 	{
 		CHECK_FOR_INTERRUPTS();
 
-		aoTupleId = (AOTupleId *) &slot->tts_tid;
-		if (AppendOnlyVisimap_IsVisible(&scanDesc->visibilityMap, aoTupleId))
-		{
-			AOCSMoveTuple(slot,
-						  insertDesc,
-						  resultRelInfo,
-						  estate);
-			movedTupleCount++;
-		}
-		else
-		{
-			/* Tuple is invisible and needs to be dropped */
-			AppendOnlyThrowAwayTuple(aorel, slot);
-		}
+		/*
+ 		 * AppendOnlyVisimap_IsVisible() has already been called in aocs_getnext().
+		 */
+		Assert(AppendOnlyVisimap_IsVisible(&scanDesc->visibilityMap,
+										   (AOTupleId *) &slot->tts_tid));
+		AOCSMoveTuple(slot,
+					  insertDesc,
+					  resultRelInfo,
+					  estate);
 
 		/*
 		 * Check for vacuum delay point after approximatly a var block
@@ -316,7 +316,7 @@ AOCSSegmentFileFullCompaction(Relation aorel,
 	elogif(Debug_appendonly_print_compaction, LOG,
 		   "Finished compaction: "
 		   "AO segfile %d, relation %s, moved tuple count " INT64_FORMAT,
-		   compact_segno, relname, movedTupleCount);
+		   compact_segno, relname, tupleCount);
 
 	AppendOnlyVisimap_Finish(&visiMap, NoLock);
 
@@ -378,7 +378,11 @@ AOCSCompact(Relation aorel,
 
 		if (*insert_segno != -1)
 		{
-			insertDesc = aocs_insert_init(aorel, *insert_segno);
+			/*
+			 * Note: since we don't know how many rows will actually be inserted
+			 * we provide the default number of rows to bump gp_fastsequence by.
+			 */
+			insertDesc = aocs_insert_init(aorel, *insert_segno, NUM_FAST_SEQUENCES);
 
 			AOCSSegmentFileFullCompaction(aorel,
 										  insertDesc,

@@ -67,8 +67,6 @@ typedef struct Instrumentation
 	double		startup;		/* Total startup time (in seconds) */
 	double		total;			/* Total total time (in seconds) */
 	uint64		ntuples;		/* Total tuples produced */
-	// GPDB_12_MERGE_FIXME: we had changed 'ntuples' and 'nloops' to uint64. Do the same
-	// for 'ntuples2', or?
 	double		ntuples2;		/* Secondary node-specific tuple counter */
 	uint64		nloops;			/* # of run cycles for this node */
 	double		nfiltered1;		/* # tuples removed by scanqual or joinqual */
@@ -143,6 +141,9 @@ extern Size InstrShmemNumSlots(void);
 extern Size InstrShmemSize(void);
 extern void InstrShmemInit(void);
 extern Instrumentation *GpInstrAlloc(const Plan *node, int instrument_options);
+
+/* needed by metrics_collector*/
+extern void gp_gettmid(int32*);
 
 /*
  * For each free slot in shmem, fill it with specific pattern

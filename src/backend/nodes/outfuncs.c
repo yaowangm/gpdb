@@ -589,6 +589,7 @@ _outModifyTable(StringInfo str, const ModifyTable *node)
 	WRITE_UINT_FIELD(exclRelRTI);
 	WRITE_NODE_FIELD(exclRelTlist);
 	WRITE_NODE_FIELD(isSplitUpdates);
+	WRITE_BOOL_FIELD(forceTupleRouting);
 }
 
 static void
@@ -713,6 +714,17 @@ _outSeqScan(StringInfo str, const SeqScan *node)
 }
 
 static void
+_outDynamicSeqScan(StringInfo str, const DynamicSeqScan *node)
+{
+	WRITE_NODE_TYPE("DYNAMICSEQSCAN");
+
+	_outScanInfo(str, (Scan *)node);
+	WRITE_NODE_FIELD(partOids);
+	WRITE_NODE_FIELD(part_prune_info);
+	WRITE_NODE_FIELD(join_prune_paramids);
+}
+
+static void
 _outSampleScan(StringInfo str, const SampleScan *node)
 {
 	WRITE_NODE_TYPE("SAMPLESCAN");
@@ -775,6 +787,17 @@ _outIndexOnlyScan(StringInfo str, const IndexOnlyScan *node)
 }
 
 static void
+_outDynamicIndexScan(StringInfo str, const DynamicIndexScan *node)
+{
+	WRITE_NODE_TYPE("DYNAMICINDEXSCAN");
+
+	outIndexScanFields(str, &node->indexscan);
+	WRITE_NODE_FIELD(partOids);
+	WRITE_NODE_FIELD(part_prune_info);
+	WRITE_NODE_FIELD(join_prune_paramids);
+}
+
+static void
 _outBitmapIndexScanFields(StringInfo str, const BitmapIndexScan *node)
 {
 	_outScanInfo(str, (Scan *) node);
@@ -794,6 +817,14 @@ _outBitmapIndexScan(StringInfo str, const BitmapIndexScan *node)
 }
 
 static void
+_outDynamicBitmapIndexScan(StringInfo str, const DynamicBitmapIndexScan *node)
+{
+	WRITE_NODE_TYPE("DYNAMICBITMAPINDEXSCAN");
+
+	_outBitmapIndexScanFields(str, &node->biscan);
+}
+
+static void
 outBitmapHeapScanFields(StringInfo str, const BitmapHeapScan *node)
 {
 	_outScanInfo(str, (const Scan *) node);
@@ -807,6 +838,17 @@ _outBitmapHeapScan(StringInfo str, const BitmapHeapScan *node)
 	WRITE_NODE_TYPE("BITMAPHEAPSCAN");
 
 	outBitmapHeapScanFields(str, node);
+}
+
+static void
+_outDynamicBitmapHeapScan(StringInfo str, const DynamicBitmapHeapScan *node)
+{
+	WRITE_NODE_TYPE("DYNAMICBITMAPHEAPSCAN");
+
+	outBitmapHeapScanFields(str, &node->bitmapheapscan);
+	WRITE_NODE_FIELD(partOids);
+	WRITE_NODE_FIELD(part_prune_info);
+	WRITE_NODE_FIELD(join_prune_paramids);
 }
 
 static void
@@ -1104,9 +1146,6 @@ _outSort(StringInfo str, const Sort *node)
     WRITE_OID_ARRAY(sortOperators, node->numCols);
     WRITE_OID_ARRAY(collations, node->numCols);
     WRITE_BOOL_ARRAY(nullsFirst, node->numCols);
-
-	/* CDB */
-    WRITE_BOOL_FIELD(noduplicates);
 }
 
 static void
@@ -1294,7 +1333,6 @@ _outSplitUpdate(StringInfo str, const SplitUpdate *node)
 	WRITE_NODE_TYPE("SplitUpdate");
 
 	WRITE_INT_FIELD(actionColIdx);
-	WRITE_INT_FIELD(tupleoidColIdx);
 	WRITE_NODE_FIELD(insertColIdx);
 	WRITE_NODE_FIELD(deleteColIdx);
 
@@ -3094,6 +3132,7 @@ _outCreateStmtInfo(StringInfo str, const CreateStmt *node)
 	WRITE_STRING_FIELD(tablespacename);
 	WRITE_STRING_FIELD(accessMethod);
 	WRITE_BOOL_FIELD(if_not_exists);
+	WRITE_BOOL_FIELD(gp_style_alter_part);
 
 	WRITE_NODE_FIELD(distributedBy);
 	WRITE_NODE_FIELD(partitionBy);
@@ -3426,6 +3465,7 @@ _outAlteredTableInfo(StringInfo str, const AlteredTableInfo *node)
 	WRITE_NODE_FIELD(newvals);
 	WRITE_BOOL_FIELD(verify_new_notnull);
 	WRITE_INT_FIELD(rewrite);
+	WRITE_OID_FIELD(newAccessMethod);
 	WRITE_BOOL_FIELD(dist_opfamily_changed);
 	WRITE_OID_FIELD(new_opclass);
 	WRITE_OID_FIELD(newTableSpace);
@@ -5490,6 +5530,9 @@ outNode(StringInfo str, const void *obj)
 			case T_SeqScan:
 				_outSeqScan(str, obj);
 				break;
+			case T_DynamicSeqScan:
+				_outDynamicSeqScan(str, obj);
+				break;
 			case T_ExternalScanInfo:
 				_outExternalScanInfo(str, obj);
 				break;
@@ -5499,14 +5542,23 @@ outNode(StringInfo str, const void *obj)
 			case T_IndexScan:
 				_outIndexScan(str, obj);
 				break;
+			case T_DynamicIndexScan:
+				_outDynamicIndexScan(str,obj);
+				break;
 			case T_IndexOnlyScan:
 				_outIndexOnlyScan(str, obj);
 				break;
 			case T_BitmapIndexScan:
 				_outBitmapIndexScan(str, obj);
 				break;
+			case T_DynamicBitmapIndexScan:
+				_outDynamicBitmapIndexScan(str, obj);
+				break;
 			case T_BitmapHeapScan:
 				_outBitmapHeapScan(str, obj);
+				break;
+			case T_DynamicBitmapHeapScan:
+				_outDynamicBitmapHeapScan(str, obj);
 				break;
 			case T_TidScan:
 				_outTidScan(str, obj);

@@ -409,6 +409,8 @@ typedef struct ModifyTable
 	Index		exclRelRTI;		/* RTI of the EXCLUDED pseudo relation */
 	List	   *exclRelTlist;	/* tlist of the EXCLUDED pseudo relation */
 	List	   *isSplitUpdates;
+
+	bool		forceTupleRouting; /* dynamic scans require tuple routing */
 } ModifyTable;
 
 struct PartitionPruneInfo;		/* forward reference to struct below */
@@ -604,6 +606,33 @@ typedef struct IndexScan
 	ScanDirection indexorderdir;	/* forward or backward or don't care */
 } IndexScan;
 
+/*
+ * DynamicIndexScan
+ *   Scan a list of indexes that will be determined at run time.
+ *   The primary application of this operator is to be used
+ *   for partition tables.
+*/
+typedef struct DynamicIndexScan
+{
+	/* Fields shared with a normal IndexScan. Must be first! */
+	IndexScan	indexscan;
+
+	/*
+	 * List of partition OIDs to scan.
+	 */
+	List	   *partOids;
+
+	/* Info for run-time subplan pruning; NULL if we're not doing that */
+	struct PartitionPruneInfo *part_prune_info;
+
+	/*
+	 * Info for run-time join pruning, using Partition Selector nodes.
+	 * These param IDs contain additional Bitmapsets containing selected
+	 * partitions.
+	 */
+	List	   *join_prune_paramids;
+} DynamicIndexScan;
+
 /* ----------------
  *		index-only scan node
  *
@@ -663,6 +692,17 @@ typedef struct BitmapIndexScan
 	List	   *indexqualorig;	/* the same in original form */
 } BitmapIndexScan;
 
+/*
+ * DynamicBitmapIndexScan
+ *   Scan a list of indexes that will be determined at run time.
+ *   For use with partitioned tables.
+*/
+typedef struct DynamicBitmapIndexScan
+{
+	/* Fields shared with a normal BitmapIndexScan. Must be first! */
+	BitmapIndexScan biscan;
+} DynamicBitmapIndexScan;
+
 /* ----------------
  *		bitmap sequential scan node
  *
@@ -677,6 +717,58 @@ typedef struct BitmapHeapScan
 	Scan		scan;
 	List	   *bitmapqualorig; /* index quals, in standard expr form */
 } BitmapHeapScan;
+
+/*
+ * DynamicBitmapHeapScan
+ *   Scan a list of tables that will be determined at run time.
+ *
+ * Dynamic counterpart of a BitmapHeapScan, for use with partitioned tables.
+ */
+typedef struct DynamicBitmapHeapScan
+{
+	BitmapHeapScan bitmapheapscan;
+
+	/*
+	 * List of partition OIDs to scan.
+	 */
+	List	   *partOids;
+
+	/* Info for run-time subplan pruning; NULL if we're not doing that */
+	struct PartitionPruneInfo *part_prune_info;
+
+	/*
+	 * Info for run-time join pruning, using Partition Selector nodes.
+	 * These param IDs contain additional Bitmapsets containing selected
+	 * partitions.
+	 */
+	List	   *join_prune_paramids;
+} DynamicBitmapHeapScan;
+
+/*
+ * DynamicSeqScan
+ *   Scan a list of tables that will be determined at run time.
+ */
+typedef struct DynamicSeqScan
+{
+	/* Fields shared with a normal SeqScan. Must be first! */
+	SeqScan		seqscan;
+
+	/*
+	 * List of partition OIDs to scan.
+	 */
+	List	   *partOids;
+
+	/* Info for run-time subplan pruning; NULL if we're not doing that */
+	struct PartitionPruneInfo *part_prune_info;
+
+	/*
+	 * Info for run-time join pruning, using Partition Selector nodes.
+	 * These param IDs contain additional Bitmapsets containing selected
+	 * partitions.
+	 */
+	List	   *join_prune_paramids;
+
+} DynamicSeqScan;
 
 /* ----------------
  *		tid scan node
@@ -1064,8 +1156,6 @@ typedef struct Sort
 	Oid		   *sortOperators;	/* OIDs of operators to sort them by */
 	Oid		   *collations;		/* OIDs of collations */
 	bool	   *nullsFirst;		/* NULLS FIRST/LAST directions */
-    /* CDB */
-	bool		noduplicates;   /* TRUE if sort should discard duplicates */
 } Sort;
 
 /* ---------------
@@ -1089,8 +1179,6 @@ typedef struct Agg
 	AggSplit	aggsplit;		/* agg-splitting mode, see nodes.h */
 	int			numCols;		/* number of grouping columns */
 	AttrNumber *grpColIdx;		/* their indexes in the target list */
-	bool		combineStates;	/* input tuples contain transition states */
-	bool		finalizeAggs;	/* should we call the finalfn on agg states? */
 	Oid		   *grpOperators;	/* equality operators to compare with */
 	Oid		   *grpCollations;
 	long		numGroups;		/* estimated number of groups in input */
@@ -1364,7 +1452,6 @@ typedef struct SplitUpdate
 {
 	Plan		plan;
 	AttrNumber	actionColIdx;		/* index of action column into the target list */
-	AttrNumber	tupleoidColIdx;		/* index of tuple oid column into the target list */
 	List		*insertColIdx;		/* list of columns to INSERT into the target list */
 	List		*deleteColIdx;		/* list of columns to DELETE into the target list */
 

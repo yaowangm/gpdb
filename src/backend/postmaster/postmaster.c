@@ -153,6 +153,8 @@
 #include "cdb/cdbendpoint.h"
 #include "cdb/ic_proxy_bgworker.h"
 #include "utils/metrics_utils.h"
+#include "utils/resource_manager.h"
+#include "utils/resgroup-ops.h"
 
 /*
  * This is set in backends that are handling a GPDB specific message (FTS or
@@ -415,7 +417,11 @@ static BackgroundWorker PMAuxProcList[MaxPMAuxProc] =
 
 #ifdef ENABLE_IC_PROXY
 	{"ic proxy process", "ic proxy process",
+#ifdef FAULT_INJECTOR
+	 BGWORKER_SHMEM_ACCESS,
+#else
 	 0,
+#endif
 	 BgWorkerStart_RecoveryFinished,
 	 0, /* restart immediately if ic proxy process exits with non-zero code */
 	 "postgres", "ICProxyMain", 0, {0}, 0,
@@ -1488,6 +1494,10 @@ PostmasterMain(int argc, char *argv[])
 				(errcode_for_file_access(),
 				 errmsg("could not remove file \"%s\": %m",
 						LOG_METAINFO_DATAFILE)));
+
+	/* If enabled, init cgroup */
+	if (IsResGroupEnabled())
+		ResGroupOps_Init();
 
 	/*
 	 * If enabled, start up syslogger collection subprocess
@@ -2691,11 +2701,6 @@ retry1:
 			/*
 			 * Allow connections if hot_standby is on and our postmaster is
 			 * acting as a standby.
-			 *
-			 * GPDB_12_MERGE_FIXME: checking a GUC is not a good idea here.
-			 * In upstream, postmaster allows hot-standby connections based on
-			 * pmState in canAcceptConnections.  We should revert to that
-			 * logic.
 			 */
 			if (EnableHotStandby)
 				break;

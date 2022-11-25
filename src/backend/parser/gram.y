@@ -198,6 +198,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 
+static bool isSetWithReorganize(List **options);
 static char *greenplumLegacyAOoptions(const char *accessMethod, List **options);
 static void check_expressions_in_partition_key(PartitionSpec *spec, core_yyscan_t yyscanner);
 
@@ -434,7 +435,7 @@ static void check_expressions_in_partition_key(PartitionSpec *spec, core_yyscan_
 				sort_clause opt_sort_clause sortby_list index_params
 				opt_include opt_c_include index_including_params
 				name_list role_list from_clause from_list opt_array_bounds
-				qualified_name_list any_name any_name_list type_name_list
+				qualified_name_list qualified_name_list_with_only any_name any_name_list type_name_list
 				any_operator expr_list attrs
 				target_list opt_target_list insert_column_list set_target_list
 				set_clause_list set_clause
@@ -2911,6 +2912,18 @@ alter_table_cmd:
 					n->def = (Node *) makeInteger($6);
 					$$ = (Node *)n;
 				}
+			/* ALTER TABLE <name> ALTER COLUMN <column> SET ENCODING <coldef> */
+			| ALTER opt_column ColId SET ENCODING definition
+				{
+					ColumnReferenceStorageDirective *c =
+						makeNode(ColumnReferenceStorageDirective);
+					c->column = $3;
+					c->encoding = $6;
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					n->subtype = AT_SetColumnEncoding;
+					n->def = (Node *)c;
+					$$ = (Node *)n;
+				}
 			/* ALTER TABLE <name> ALTER [COLUMN] <colname> SET ( column_parameter = value [, ... ] ) */
 			| ALTER opt_column ColId SET reloptions
 				{
@@ -3242,12 +3255,26 @@ alter_table_cmd:
 					n->def = (Node *) list_make2($3, $4);
 					$$ = (Node *)n;
 				}
-			/* storage only */
+			/* table storage type  or reorganize only */
 			| SET WITH definition
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
-					n->subtype = AT_SetDistributedBy;
-					n->def = (Node *) list_make2($3, NULL);
+					if (isSetWithReorganize(&$3))
+					{
+						n->subtype = AT_SetDistributedBy;
+						n->def = (Node *) list_make2($3, NULL);
+					}
+					else
+					{
+						n->subtype = AT_SetAccessMethod;
+						n->name = greenplumLegacyAOoptions(n->name, &$3);
+						if (!n->name)
+							ereport(ERROR,
+								(errcode(ERRCODE_SYNTAX_ERROR),
+								 errmsg("invalid storage type"),
+								 parser_errposition(@3)));
+						n->def = (Node *) $3;
+					}
 					$$ = (Node *)n;
 				}
 			| alter_table_partition_cmd
@@ -3291,6 +3318,38 @@ alter_table_cmd:
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_ChangeOwner;
 					n->newowner = $3;
+					$$ = (Node *)n;
+				}
+			/* ALTER TABLE <name> SET ACCESS METHOD <amname> WITH (<reloptions>) */
+			| SET ACCESS METHOD name OptWith
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					char *witham = greenplumLegacyAOoptions(n->name, &$5);
+					n->subtype = AT_SetAccessMethod;
+					n->name = $4;
+					/*
+					 * If there's any legacy AO options specified in the WITH
+					 * clause such as 'appendonly' or 'appendoptimized', it has
+					 * to match with the AM name.
+					 */
+					if (witham) 
+					{
+						if (strlen(witham) != strlen(n->name) || 
+							strncmp(n->name, witham, strlen(n->name)) != 0)
+							ereport(ERROR,
+									(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+									 errmsg("ACCESS METHOD is specified as \"%s\" but "
+										"the WITH option indicates it to be \"%s\"",
+										n->name, witham),
+									 parser_errposition(@5)));
+						else
+							ereport(NOTICE,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("Redundant clauses are used to indicate the access method."),
+									 errhint("Only one of these is needed to indicate access method: the "
+										"SET ACCESS METHOD clause or the options in the WITH clause.")));
+					}
+					n->def = (Node *) $5;
 					$$ = (Node *)n;
 				}
 			/* ALTER TABLE <name> SET TABLESPACE <tablespacename> */
@@ -4476,6 +4535,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $12;
 					n->tablespacename = $13;
 					n->if_not_exists = false;
+					n->gp_style_alter_part = false;
 					n->distributedBy = (DistributedBy *) $14;
 					n->relKind = RELKIND_RELATION;
 
@@ -4506,6 +4566,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $15;
 					n->tablespacename = $16;
 					n->if_not_exists = true;
+					n->gp_style_alter_part = false;
 					n->distributedBy = (DistributedBy *) $17;
 					n->relKind = RELKIND_RELATION;
 
@@ -4537,6 +4598,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $11;
 					n->tablespacename = $12;
 					n->if_not_exists = false;
+					n->gp_style_alter_part = false;
 					n->distributedBy = (DistributedBy *) $13;
 					n->relKind = RELKIND_RELATION;
 
@@ -4568,6 +4630,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $14;
 					n->tablespacename = $15;
 					n->if_not_exists = true;
+					n->gp_style_alter_part = false;
 					n->distributedBy = (DistributedBy *) $16;
 					n->relKind = RELKIND_RELATION;
 
@@ -4599,6 +4662,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $13;
 					n->tablespacename = $14;
 					n->if_not_exists = false;
+					n->gp_style_alter_part = false;
 					n->distributedBy = NULL;
 					n->relKind = RELKIND_RELATION;
 
@@ -4630,6 +4694,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $16;
 					n->tablespacename = $17;
 					n->if_not_exists = true;
+					n->gp_style_alter_part = false;
 					n->distributedBy = NULL;
 					n->relKind = RELKIND_RELATION;
 
@@ -9478,7 +9543,7 @@ privilege:	SELECT opt_column_list
  * opt_table.  You're going to get conflicts.
  */
 privilege_target:
-			qualified_name_list
+			qualified_name_list_with_only
 				{
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
 					n->targtype = ACL_TARGET_OBJECT;
@@ -9486,7 +9551,7 @@ privilege_target:
 					n->objs = $1;
 					$$ = n;
 				}
-			| TABLE qualified_name_list
+			| TABLE qualified_name_list_with_only
 				{
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
 					n->targtype = ACL_TARGET_OBJECT;
@@ -17578,6 +17643,27 @@ qualified_name_list:
 			| qualified_name_list ',' qualified_name { $$ = lappend($1, $3); }
 		;
 
+qualified_name_list_with_only:
+			qualified_name
+				{
+					$$ = list_make1($1);
+				}
+			| ONLY qualified_name
+				{ 
+					$2->inh = false; 
+					$$ = list_make1($2);
+				}
+			| qualified_name_list ',' qualified_name
+				{
+					$$ = lappend($1, $3);
+				}
+			| qualified_name_list ',' ONLY qualified_name
+				{
+					$4->inh = false; 
+					$$ = lappend($1, $4);
+				}
+		;
+
 /*
  * The production for a qualified relation name has to exactly match the
  * production for a qualified func_name, because in a FROM clause we cannot
@@ -19629,6 +19715,28 @@ makeRecursiveViewSelect(char *relname, List *aliases, Node *query)
 
 	return (Node *) s;
 }
+
+static bool
+isSetWithReorganize(List **options)
+{
+	ListCell *lc;
+	foreach (lc, *options)
+	{
+		DefElem *elem = lfirst(lc);
+
+		if (strcmp(elem->defname, "reorganize") == 0)
+		{
+			if (list_length(*options) == 1)
+				return true;
+			else
+				ereport(ERROR,
+					(errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("reorganize isn't supported with other options in SET WITH")));
+		}
+	}
+	return false;
+}
+
 
 /*
  * Greenplum: a thin wax off layer to keep compatibility with the legacy syntax

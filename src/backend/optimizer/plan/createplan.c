@@ -2082,13 +2082,6 @@ create_projection_plan(PlannerInfo *root, ProjectionPath *best_path, int flags)
 		{
 			List	   *all_clauses = best_path->cdb_restrict_clauses;
 
-			/* Replace any outer-relation variables with nestloop params */
-			if (best_path->path.param_info)
-			{
-				all_clauses = (List *)
-					replace_nestloop_params(root, (Node *) all_clauses);
-			}
-
 			/* Sort clauses into best execution order */
 			all_clauses = order_qual_clauses(root, all_clauses);
 
@@ -2097,6 +2090,13 @@ create_projection_plan(PlannerInfo *root, ProjectionPath *best_path, int flags)
 
 			/* but we actually also want the pseudoconstants */
 			pseudoconstants = extract_actual_clauses(all_clauses, true);
+
+			/* Replace any outer-relation variables with nestloop params */
+			if (best_path->path.param_info)
+			{
+				scan_clauses = (List *)
+					replace_nestloop_params(root, (Node *) scan_clauses);
+			}
 		}
 
 		/* We need a Result node */
@@ -3598,7 +3598,7 @@ create_bitmap_scan_plan(PlannerInfo *root,
 	bitmapqualplan = create_bitmap_subplan(root, best_path->bitmapqual,
 										   &bitmapqualorig, &indexquals,
 										   &indexECs);
-	/* GPDB_12_MERGE_FIXME the parallel StreamBitmap scan is not implemented */
+	/* GPDB_12_MERGE_FEATURE_NOT_SUPPORTED: the parallel StreamBitmap scan is not implemented */
 	/*
 	 * if (best_path->path.parallel_aware)
 	 *     bitmap_subplan_mark_shared(bitmapqualplan);
@@ -6756,8 +6756,6 @@ make_sort(Plan *lefttree, int numCols,
 
 	Assert(sortColIdx[0] != 0);
 
-	node->noduplicates = false; /* CDB */
-
 	return node;
 }
 
@@ -7515,14 +7513,6 @@ make_unique_from_sortclauses(Plan *lefttree, List *distinctList)
 	node->uniqOperators = uniqOperators;
 	node->uniqCollations = uniqCollations;
 
-	/* CDB */	/* pass DISTINCT to sort */
-	if (IsA(lefttree, Sort) && gp_enable_sort_distinct)
-	{
-		Sort	   *pSort = (Sort *) lefttree;
-
-		pSort->noduplicates = true;
-	}
-
 	return node;
 }
 
@@ -7878,6 +7868,7 @@ make_modifytable(PlannerInfo *root,
 	node->epqParam = epqParam;
 
 	node->isSplitUpdates = is_split_updates;
+	node->forceTupleRouting = false;
 
 	/*
 	 * For each result relation that is a foreign table, allow the FDW to

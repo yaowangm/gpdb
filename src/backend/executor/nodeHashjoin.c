@@ -152,7 +152,9 @@ static TupleTableSlot *ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
 												 uint32 *hashvalue,
 												 TupleTableSlot *tupleSlot);
 static bool ExecHashJoinNewBatch(HashJoinState *hjstate);
+#ifdef USE_ASSERT_CHECKING
 static bool isNotDistinctJoin(List *qualList);
+#endif
 static bool ExecParallelHashJoinNewBatch(HashJoinState *hjstate);
 static void ExecParallelHashJoinPartitionOuter(HashJoinState *node);
 
@@ -1590,12 +1592,15 @@ ExecHashJoinGetSavedTuple(HashJoinState *hjstate,
 	 * cheating.
 	 */
 	nread = BufFileRead(file, (void *) header, sizeof(header));
-	if (nread != sizeof(header))				/* end of file */
+	if (nread == 0)				/* end of file */
 	{
 		ExecClearTuple(tupleSlot);
 		return NULL;
 	}
-
+	if (nread != sizeof(header))
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not read from hash-join temporary file: %m")));
 	*hashvalue = header[0];
 	tuple = (MinimalTuple) palloc(header[1]);
 	tuple->t_len = header[1];
@@ -1736,6 +1741,7 @@ ReleaseHashTable(HashJoinState *node)
 
 }
 
+#ifdef USE_ASSERT_CHECKING
 /* Is this an IS-NOT-DISTINCT-join qual list (as opposed the an equijoin)?
  *
  * XXX We perform an abbreviated test based on the assumptions that 
@@ -1762,6 +1768,7 @@ isNotDistinctJoin(List *qualList)
 	}
 	return false;
 }
+#endif
 
 static void
 ExecEagerFreeHashJoin(HashJoinState *node)

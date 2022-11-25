@@ -308,9 +308,6 @@ select attstattarget from pg_attribute where attrelid = 'aocs_addcol.addcol1'::r
 alter table addcol1 set distributed randomly;
 alter table addcol1 set distributed by (a);
 
--- test some constraints (unique indexes do not work for unique and pkey)
-alter table addcol1 add constraint tunique unique(a);
-alter table addcol1 add constraint tpkey primary key(a);
 alter table addcol1 add constraint tcheck check (a is not null);
 
 -- test changing the storage type of a column
@@ -323,10 +320,6 @@ alter table addcol1 alter column f_renamed set storage external;
 select attname, attstorage from pg_attribute where attrelid='addcol1'::regclass and attname='f_renamed';
 alter table addcol1 alter column f_renamed set storage extended;
 select attname, attstorage from pg_attribute where attrelid='addcol1'::regclass and attname='f_renamed';
-
--- cannot set reloption appendonly
-alter table addcol1 set (appendonly=true, compresslevel=5, fillfactor=50);
-alter table addcol1 reset (appendonly, compresslevel, fillfactor);
 
 -- test some aocs partition table altering
 create table alter_aocs_part_table (a int, b int) with (appendonly=true, orientation=column) distributed by (a)
@@ -373,7 +366,7 @@ alter table aocs_multi_level_part_table add partition part3 start(date '2010-01-
   with (appendonly=true, orientation=column)
   (subpartition usa values ('usa'), subpartition asia values ('asia'), default subpartition def);
 
--- Add default partition (defaults to heap storage unless set with AO)
+-- Add default partition (defaults to parent table's AM)
 alter table aocs_multi_level_part_table add default partition yearYYYY (default subpartition def);
 SELECT am.amname FROM pg_class c LEFT JOIN pg_am am ON (c.relam = am.oid)
 WHERE c.relname = 'aocs_multi_level_part_table_1_prt_yearyyyy_2_prt_def';
@@ -472,3 +465,17 @@ RESET gp_default_storage_options;
 ALTER TABLE aocs_alter_add_col_no_compress ADD COLUMN d int;
 \d+ aocs_alter_add_col_no_compress 
 DROP TABLE aocs_alter_add_col_no_compress;
+
+-- test case: ensure reorganize keep default compresstype, compresslevel and blocksize table options
+CREATE TABLE aocs_alter_add_col_reorganize(a int) WITH (appendonly=true, orientation=column, compresstype=rle_type, compresslevel=4, blocksize=65536);
+ALTER TABLE aocs_alter_add_col_reorganize SET WITH (reorganize=true);
+SET gp_default_storage_options ='compresstype=zlib, compresslevel=2';
+-- use statement encoding
+ALTER TABLE aocs_alter_add_col_reorganize ADD COLUMN b int ENCODING(compresstype=zlib, compresslevel=3, blocksize=16384);
+-- use table setting
+ALTER TABLE aocs_alter_add_col_reorganize ADD COLUMN c int;
+RESET gp_default_storage_options;
+-- use table setting
+ALTER TABLE aocs_alter_add_col_reorganize ADD COLUMN d int;
+\d+ aocs_alter_add_col_reorganize
+DROP TABLE aocs_alter_add_col_reorganize;

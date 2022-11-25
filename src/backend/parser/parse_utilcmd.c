@@ -241,6 +241,16 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 	 */
 	if (stmt->if_not_exists && OidIsValid(existing_relid))
 	{
+		/*
+		 * If we are in an extension script, insist that the pre-existing
+		 * object be a member of the extension, to avoid security risks.
+		 */
+		ObjectAddress address;
+
+		ObjectAddressSet(address, RelationRelationId, existing_relid);
+		checkMembershipInCurrentExtension(&address);
+
+		/* OK to skip */
 		ereport(NOTICE,
 				(errcode(ERRCODE_DUPLICATE_TABLE),
 				 errmsg("relation \"%s\" already exists, skipping",
@@ -2596,6 +2606,12 @@ transformDistributedBy(ParseState *pstate,
 				ColumnDef  *column = (ColumnDef *) lfirst(columns);
 				Oid			typeOid;
 
+				if (column->generated == ATTRIBUTE_GENERATED_STORED)
+				{
+					/* generated columns can't in distribution key, skip */
+					continue;
+				}
+
 				typeOid = typenameTypeId(NULL, column->typeName);
 
 				/*
@@ -2708,6 +2724,20 @@ transformDistributedBy(ParseState *pstate,
 
 					if (strcmp(column->colname, colname) == 0)
 					{
+						if (column->generated == ATTRIBUTE_GENERATED_STORED)
+						{
+							/* The generated columns are computed after distribution.
+							 * If generated columns are used as distribution key, they
+							 * will always use null values to compute the distribution
+							 * key value, and it will cause wrong query results.
+							 */
+							ereport(ERROR,
+									(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+									 errmsg("cannot use generated column in distribution key"),
+									 errdetail("Column \"%s\" is a generated column.",
+												column->colname),
+									 parser_errposition(pstate, column->location)));
+						}
 						found = true;
 						break;
 					}

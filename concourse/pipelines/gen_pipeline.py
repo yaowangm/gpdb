@@ -18,7 +18,7 @@
 # under the License.
 # ----------------------------------------------------------------------
 
-"""Generate pipeline (default: gpdb_master-generated.yml) from template (default:
+"""Generate pipeline (default: gpdb_main-generated.yml) from template (default:
 templates/gpdb-tpl.yml).
 
 Python module requirements:
@@ -48,9 +48,9 @@ TEMPLATE_ENVIRONMENT = Environment(
     extensions=['jinja2.ext.loopcontrols']
 )
 
-BASE_BRANCH = "master"  # when branching gpdb update to 7X_STABLE, 6X_STABLE, etc.
+BASE_BRANCH = "main"  # when branching gpdb update to 7X_STABLE, 6X_STABLE, etc.
 
-SECRETS_PATH = os.path.expanduser('~/workspace/gp-continuous-integration/secrets')
+CI_VARS_PATH = os.path.join(os.getcwd(), '..', 'vars')
 
 # Variables that govern pipeline validation
 RELEASE_VALIDATOR_JOB = ['Release_Candidate', 'Build_Release_Candidate_RPMs']
@@ -68,12 +68,8 @@ JOBS_THAT_ARE_GATES = [
 JOBS_THAT_SHOULD_NOT_BLOCK_RELEASE = (
     [
         'combine_cli_coverage',
-        'compile_gpdb_binary_swap_centos7',
         'compile_gpdb_clients_windows',
         'walrep_2',
-        'madlib_build_gppkg',
-        'MADlib_Test_planner_centos7',
-        'MADlib_Test_orca_centos7',
         'Publish Server Builds',
     ] + RELEASE_VALIDATOR_JOB + JOBS_THAT_ARE_GATES
 )
@@ -99,7 +95,7 @@ def suggested_git_remote():
 def suggested_git_branch():
     """Try to guess the current git branch"""
     branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode('utf-8').rstrip()
-    if branch == "master" or is_a_base_branch(branch):
+    if branch == "main" or is_a_base_branch(branch):
         return "<branch-name>"
     return branch
 
@@ -149,19 +145,14 @@ def validate_pipeline_release_jobs(raw_pipeline_yml):
     return True
 
 
-def validate_target(target):
-    expected_secrets_file = "%s/ccp_ci_secrets_%s.yml" % (SECRETS_PATH, target)
-
-    if not os.path.exists(expected_secrets_file):
-        raise Exception('Invalid target "%s"; no secrets file found.  Please ensure your secrets files in %s are up to date.' % (target, SECRETS_PATH))
-
-
 def create_pipeline(args, git_remote, git_branch):
     """Generate OS specific pipeline sections"""
     if args.test_trigger_false:
         test_trigger = "true"
     else:
         test_trigger = "false"
+
+    variables_type = args.pipeline_target
 
     context = {
         'template_filename': args.template_filename,
@@ -175,7 +166,8 @@ def create_pipeline(args, git_remote, git_branch):
         'build_test_rc_rpm': args.build_test_rc_rpm,
         'directed_release': args.directed_release,
         'git_username': git_remote.split('/')[-2],
-        'git_branch': git_branch
+        'git_branch': git_branch,
+        'variables_type': variables_type
     }
 
     pipeline_yml = render_template(args.template_filename, context)
@@ -193,17 +185,16 @@ def create_pipeline(args, git_remote, git_branch):
     return True
 
 
-def gen_pipeline(args, pipeline_name, secret_files, git_remote, git_branch):
-    secrets = ""
-    for secret in secret_files:
-        secrets += "-l %s/%s " % (SECRETS_PATH, secret)
+def gen_pipeline(args, pipeline_name, variable_files, git_remote, git_branch):
+    variables = ""
+    for variable in variable_files:
+        variables += "-l %s/%s " % (CI_VARS_PATH, variable)
 
     format_args = {
         'target': args.pipeline_target,
         'name': pipeline_name,
         'output_path': args.output_filepath,
-        'secrets_path': SECRETS_PATH,
-        'secrets': secrets,
+        'variables': variables,
         'remote': git_remote,
         'branch': git_branch,
     }
@@ -213,8 +204,7 @@ set-pipeline \
 --check-creds \
 --pipeline {name} \
 --config {output_path} \
---load-vars-from {secrets_path}/gpdb_common-ci-secrets.yml \
-{secrets} \
+{variables} \
 --var gpdb-git-remote={remote} \
 --var gpdb-git-branch={branch} \
 --var pipeline-name={name} \
@@ -253,22 +243,21 @@ def print_fly_commands(args, git_remote, git_branch):
     print(header(args))
     if args.directed_release: 
         print('NOTE: You can set the directed release pipeline with the following:\n')
-        print(gen_pipeline(args, pipeline_name, ["gpdb_%s_without_asserts-ci-secrets.prod.yml" % BASE_BRANCH],
+        print(gen_pipeline(args, pipeline_name, ["common_prod.yml", "without_asserts_common_prod.yml"],
                            "https://github.com/greenplum-db/gpdb.git", git_branch))
         return
     if args.pipeline_target == 'prod':
         print('NOTE: You can set the production pipelines with the following:\n')
-        pipeline_name = "gpdb_%s" % BASE_BRANCH if BASE_BRANCH == "master" else BASE_BRANCH
-        print(gen_pipeline(args, pipeline_name, ["gpdb_%s-ci-secrets.prod.yml" % BASE_BRANCH],
+        pipeline_name = "gpdb_%s" % BASE_BRANCH if BASE_BRANCH == "main" else BASE_BRANCH
+        print(gen_pipeline(args, pipeline_name, ["common_prod.yml"],
                            "https://github.com/greenplum-db/gpdb.git", BASE_BRANCH))
-        print(gen_pipeline(args, "%s_without_asserts" % pipeline_name, ["gpdb_%s_without_asserts-ci-secrets.prod.yml" % BASE_BRANCH],
+        print(gen_pipeline(args, "%s_without_asserts" % pipeline_name, ["common_prod.yml", "without_asserts_common_prod.yml"],
                            "https://github.com/greenplum-db/gpdb.git", BASE_BRANCH))
         return
 
-    print('NOTE: You can set the developer pipeline with the following:\n')
-    print(gen_pipeline(args, pipeline_name, ["gpdb_%s-ci-secrets.dev.yml" % BASE_BRANCH,
-                                             "ccp_ci_secrets_%s.yml" % args.pipeline_target], git_remote, git_branch))
-
+    else:
+        print('NOTE: You can set the developer pipeline with the following:\n')
+        print(gen_pipeline(args, pipeline_name, ["common_prod.yml", "common_" + args.pipeline_target + ".yml"], git_remote, git_branch))
 
 def main():
     """main: parse args and create pipeline"""
@@ -301,8 +290,8 @@ def main():
         '--os_types',
         action='store',
         dest='os_types',
-        default=['centos7'],
-        choices=['centos7', 'rhel8', 'ubuntu18.04', 'win'],
+        default=['rhel8'],
+        choices=['rhel8', 'win'],
         nargs='+',
         help='List of OS values to support'
     )
@@ -313,8 +302,9 @@ def main():
         action='store',
         dest='pipeline_target',
         default='dev',
-        help='Concourse target to use either: prod, dev, or <team abbreviation> '
-             'where abbreviation is found from the team\'s ccp secrets file name ending.'
+        help='Concourse target supported: prod, dev, dev2, cm, ud, or dp. '
+             'The Pipeline target value is also used to identify the CI '
+             'project specific common file in the vars directory.'
     )
 
     parser.add_argument(
@@ -401,8 +391,6 @@ def main():
     if args.pipeline_target != 'prod' and args.directed_release:
         raise Exception('--directed flag can be used only with prod target')
 
-    validate_target(args.pipeline_target)
-
     output_path_is_set = os.path.basename(args.output_filepath) != default_output_filename
     if (args.user != os.getlogin() and output_path_is_set):
         print("You can only use one of --output or --user.")
@@ -417,7 +405,7 @@ def main():
         args.use_ICW_workers = True
 
     if args.pipeline_configuration == 'prod' or args.pipeline_configuration == 'full' or args.directed_release:
-        args.os_types = ['centos6', 'centos7', 'rhel8', 'ubuntu18.04', 'win']
+        args.os_types = ['rhel8', 'win']
         args.test_sections = [
             'ICW',
             'Replication',
@@ -432,7 +420,7 @@ def main():
     git_branch = suggested_git_branch()
 
     # if generating a dev pipeline but didn't specify an output,
-    # don't overwrite the master pipeline
+    # don't overwrite the main pipeline
     if args.pipeline_target != 'prod' and not output_path_is_set:
         pipeline_file_suffix = suggested_git_branch()
         if args.user != os.getlogin():

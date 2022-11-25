@@ -24,13 +24,13 @@ The disk settings for cloud deployments are the same as on-premise with a few mo
    ```
    rw,noatime,nobarrier,nodev,inode64
    ```
-    <br/>**Note:** The `nobarrier` option is not supported on Ubuntu nodes.
+    <br/>**Note:** The `nobarrier` option is not supported on RHEL 8 or Ubuntu nodes.
 -  Use mq-deadline instead of the deadline scheduler for the R5 series instance type in AWS
 -  Use a swap disk per VM (32GB size works well)
 
 ## <a id="cd-security"></a>Security
 
-It is highly encouraged to disable SSH password authentication to the virtual machines in the cloud and use SSH keys instead.  Using MD5-encrypted passwords for Greenplum Database is also a good practice.
+It is highly encouraged to deactivate SSH password authentication to the virtual machines in the cloud and use SSH keys instead.  Using MD5-encrypted passwords for Greenplum Database is also a good practice.
 
 ## <a id="aws"></a>Amazon Web Services (AWS)
 

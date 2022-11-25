@@ -17,6 +17,7 @@
 
 #include "catalog/genbki.h"
 #include "catalog/pg_appendonly_d.h"
+#include "catalog/pg_class.h"
 #include "utils/relcache.h"
 #include "utils/snapshot.h"
 
@@ -68,10 +69,11 @@ typedef enum AORelationVersion
 											 * were introduced, see MPP-7251 and MPP-7372. */
 	AORelationVersion_PG83 = 3,				/* Same as Aligned64bit, but numerics are stored
 											 * in the PostgreSQL 8.3 format. */
+	AORelationVersion_PG12 = 4,             /* version that removed block directory hole filling. */
 	MaxAORelationVersion                    /* must always be last */
 } AORelationVersion;
 
-#define AORelationVersion_GetLatest() AORelationVersion_PG83
+#define AORelationVersion_GetLatest() AORelationVersion_PG12
 
 #define AORelationVersion_IsValid(version) \
 	(version > AORelationVersion_None && version < MaxAORelationVersion)
@@ -164,7 +166,6 @@ UpdateAppendOnlyEntryAuxOids(Oid relid,
 extern void
 RemoveAppendonlyEntry(Oid relid);
 
-extern void
-SwapAppendonlyEntries(Oid entryRelId1, Oid entryRelId2);
+extern void ATAOEntries(Form_pg_class relform1, Form_pg_class relform2);
 
 #endif   /* PG_APPENDONLY_H */

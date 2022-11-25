@@ -40,6 +40,7 @@ CDrvdPropScalar::CDrvdPropScalar(CMemoryPool *mp)
 	  m_fHasNonScalarFunction(false),
 	  m_ulDistinctAggs(0),
 	  m_fHasMultipleDistinctAggs(false),
+	  m_ulOrderedAggs(0),
 	  m_fHasScalarArrayCmp(false),
 	  m_is_complete(false)
 {
@@ -103,6 +104,8 @@ CDrvdPropScalar::Derive(CMemoryPool *, CExpressionHandle &exprhdl,
 	DeriveHasMultipleDistinctAggs(exprhdl);
 
 	DeriveHasScalarArrayCmp(exprhdl);
+
+	DeriveContainsOnlyReplicationSafeAggFuncs(exprhdl);
 
 	m_is_complete = true;
 }
@@ -415,6 +418,41 @@ CDrvdPropScalar::DeriveHasScalarArrayCmp(CExpressionHandle &exprhdl)
 		m_fHasScalarArrayCmp = popScalar->FHasScalarArrayCmp(exprhdl);
 	}
 	return m_fHasScalarArrayCmp;
+}
+
+ULONG
+CDrvdPropScalar::DeriveTotalOrderedAggs(CExpressionHandle &exprhdl)
+{
+	if (COperator::EopScalarProjectList == exprhdl.Pop()->Eopid() &&
+		!m_is_prop_derived->ExchangeSet(EdptUlOrderedAggs))
+	{
+		m_ulOrderedAggs = CScalarProjectList::UlOrderedAggs(exprhdl);
+	}
+	return m_ulOrderedAggs;
+}
+
+BOOL
+CDrvdPropScalar::ContainsOnlyReplicationSafeAggFuncs() const
+{
+	GPOS_RTL_ASSERT(IsComplete());
+	return m_fContainsOnlyReplicationSafeAggFuncs;
+}
+
+BOOL
+CDrvdPropScalar::DeriveContainsOnlyReplicationSafeAggFuncs(
+	CExpressionHandle &exprhdl)
+{
+	if (!m_is_prop_derived->ExchangeSet(
+			EdptFContainsOnlyReplicationSafeAggFuncs))
+	{
+		if (COperator::EopScalarProjectList == exprhdl.Pop()->Eopid())
+		{
+			m_fContainsOnlyReplicationSafeAggFuncs =
+				CScalarProjectList::FContainsOnlyReplicationSafeAggFuncs(
+					exprhdl);
+		}
+	}
+	return m_fContainsOnlyReplicationSafeAggFuncs;
 }
 
 

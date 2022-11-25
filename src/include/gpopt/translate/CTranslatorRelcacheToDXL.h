@@ -46,7 +46,7 @@ extern "C" {
 
 // fwd decl
 struct RelationData;
-typedef struct RelationData *Relation;
+using Relation = struct RelationData *;
 struct LogicalIndexes;
 
 namespace gpdxl
@@ -180,9 +180,8 @@ private:
 													IMDId *mdid);
 
 	// retrieve a GPDB metadata object from the relcache
-	static IMDCacheObject *RetrieveObjectGPDB(CMemoryPool *mp,
-											  CMDAccessor *md_accessor,
-											  IMDId *mdid);
+	static IMDCacheObject *RetrieveObjectGPDB(CMemoryPool *mp, IMDId *mdid,
+											  IMDCacheObject::Emdtype mdtype);
 
 	// retrieve relstats object from the relcache
 	static IMDCacheObject *RetrieveRelStats(CMemoryPool *mp, IMDId *mdid);
@@ -312,16 +311,6 @@ private:
 	static IMdIdArray *RetrieveRelDistributionOpFamilies(CMemoryPool *mp,
 														 GpPolicy *policy);
 
-	// for non-leaf partition tables return the number of child partitions
-	// else return 1
-	static ULONG RetrieveNumChildPartitions(OID rel_oid);
-
-	// generate statistics for the system level columns
-	static CDXLColStats *GenerateStatsForSystemCols(
-		CMemoryPool *mp, OID rel_oid, CMDIdColStats *mdid_col_stats,
-		CMDName *md_colname, OID att_type, AttrNumber attrnum,
-		CDXLBucketArray *dxl_stats_bucket_array, CDouble rows);
-
 	static IMdIdArray *RetrieveIndexPartitions(CMemoryPool *mp, OID rel_oid);
 
 	static IMDRelation::Erelstoragetype RetrieveStorageTypeForPartitionedTable(
@@ -330,8 +319,8 @@ private:
 public:
 	// retrieve a metadata object from the relcache
 	static IMDCacheObject *RetrieveObject(CMemoryPool *mp,
-										  CMDAccessor *md_accessor,
-										  IMDId *mdid);
+										  CMDAccessor *md_accessor, IMDId *mdid,
+										  IMDCacheObject::Emdtype mdtype);
 
 	// retrieve a relation from the relcache
 	static IMDRelation *RetrieveRel(CMemoryPool *mp, CMDAccessor *md_accessor,

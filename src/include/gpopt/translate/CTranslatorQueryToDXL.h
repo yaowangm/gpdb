@@ -44,13 +44,13 @@ namespace gpdxl
 using namespace gpos;
 using namespace gpopt;
 
-typedef CHashMap<ULONG, BOOL, gpos::HashValue<ULONG>, gpos::Equals<ULONG>,
-				 CleanupDelete<ULONG>, CleanupDelete<BOOL> >
-	UlongBoolHashMap;
+using UlongBoolHashMap =
+	CHashMap<ULONG, BOOL, gpos::HashValue<ULONG>, gpos::Equals<ULONG>,
+			 CleanupDelete<ULONG>, CleanupDelete<BOOL>>;
 
-typedef CHashMapIter<INT, ULONG, gpos::HashValue<INT>, gpos::Equals<INT>,
-					 CleanupDelete<INT>, CleanupDelete<ULONG> >
-	IntUlongHashmapIter;
+using IntUlongHashmapIter =
+	CHashMapIter<INT, ULONG, gpos::HashValue<INT>, gpos::Equals<INT>,
+				 CleanupDelete<INT>, CleanupDelete<ULONG>>;
 
 //---------------------------------------------------------------------------
 //	@class:
@@ -216,6 +216,10 @@ private:
 
 	// check if the argument of a DQA has already being used by another DQA
 	static BOOL IsDuplicateDqaArg(List *dqa_list, Aggref *aggref);
+
+	void CheckNoDuplicateAliasGroupingColumn(List *target_list,
+											 List *group_clause,
+											 List *grouping_set);
 
 	// translate a query with grouping sets
 	CDXLNode *TranslateGroupingSets(

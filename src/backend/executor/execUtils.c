@@ -211,6 +211,8 @@ CreateExecutorState(void)
 	estate->currentSliceId = 0;
 	estate->eliminateAliens = false;
 
+	estate->gp_bypass_unique_check = false;
+
 	/*
 	 * Return the executor state structure
 	 */
@@ -1642,6 +1644,18 @@ void mppExecutorFinishup(QueryDesc *queryDesc)
 	}
 
 	/*
+	 * If we are finishing a query before all the tuples of the query
+	 * plan were fetched we must call ExecSquelchNode before checking
+	 * the dispatch results in order to tell we no longer
+	 * need any more tuples.
+	 */
+	if (Gp_role == GP_ROLE_DISPATCH && !estate->es_got_eos &&
+		!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY))
+	{
+		ExecSquelchNode(queryDesc->planstate);
+	}
+
+	/*
 	 * If QD, wait for QEs to finish and check their results.
 	 */
 	if (estate->dispatcherState && estate->dispatcherState->primaryResults)
@@ -1650,17 +1664,6 @@ void mppExecutorFinishup(QueryDesc *queryDesc)
 		CdbDispatcherState *ds = estate->dispatcherState;
 		DispatchWaitMode waitMode = DISPATCH_WAIT_NONE;
 		ErrorData *qeError = NULL;
-
-		/*
-		 * If we are finishing a query before all the tuples of the query
-		 * plan were fetched we must call ExecSquelchNode before checking
-		 * the dispatch results in order to tell the nodes below we no longer
-		 * need any more tuples.
-		 */
-		if (!estate->es_got_eos)
-		{
-			ExecSquelchNode(queryDesc->planstate);
-		}
 
 		/*
 		 * Wait for completion of all QEs.  We send a "graceful" query
@@ -2314,4 +2317,65 @@ ExecGetReturningSlot(EState *estate, ResultRelInfo *relInfo)
 	}
 
 	return relInfo->ri_ReturningSlot;
+}
+
+/*
+ * During attribute re-mapping for heterogeneous partitions, we use
+ * this struct to identify which varno's attributes will be re-mapped.
+ * Using this struct as a *context* during expression tree walking, we
+ * can skip varattnos that do not belong to a given varno.
+ */
+typedef struct AttrMapContext
+{
+	const AttrNumber *newattno; /* The mapping table to remap the varattno */
+	Index		varno;			/* Which rte's varattno to re-map */
+} AttrMapContext;
+
+/*
+ * Remaps the varattno of a varattno in a Var node using an attribute map.
+ */
+static bool
+change_varattnos_varno_walker(Node *node, const AttrMapContext *attrMapCxt)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
+
+		if (var->varlevelsup == 0 && (var->varno == attrMapCxt->varno) &&
+			var->varattno > 0)
+		{
+			/*
+			 * ??? the following may be a problem when the node is multiply
+			 * referenced though stringToNode() doesn't create such a node
+			 * currently.
+			 */
+			Assert(attrMapCxt->newattno[var->varattno - 1] > 0);
+			var->varattno = var->varoattno = attrMapCxt->newattno[var->varattno - 1];
+		}
+		return false;
+	}
+	return expression_tree_walker(node, change_varattnos_varno_walker,
+								  (void *) attrMapCxt);
+}
+
+/*
+ * Replace varattno values for a given varno RTE index in an expression
+ * tree according to the given map array, that is, varattno N is replaced
+ * by newattno[N-1].  It is caller's responsibility to ensure that the array
+ * is long enough to define values for all user varattnos present in the tree.
+ * System column attnos remain unchanged.
+ *
+ * Note that the passed node tree is modified in-place!
+ */
+void
+change_varattnos_of_a_varno(Node *node, const AttrNumber *newattno, Index varno)
+{
+	AttrMapContext attrMapCxt;
+
+	attrMapCxt.newattno = newattno;
+	attrMapCxt.varno = varno;
+
+	(void) change_varattnos_varno_walker(node, &attrMapCxt);
 }

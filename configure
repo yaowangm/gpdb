@@ -737,6 +737,7 @@ with_ldap
 with_krb_srvnam
 krb_srvtab
 with_gssapi
+with_pythonsrc_ext
 with_python
 with_perl
 with_tcl
@@ -792,7 +793,6 @@ GCOV
 enable_debug
 enable_orafce
 enable_debug_extensions
-enable_pxf
 enable_gpfdist
 enable_strong_random
 enable_rpath
@@ -862,7 +862,6 @@ enable_spinlocks
 enable_atomics
 enable_strong_random
 enable_gpfdist
-enable_pxf
 enable_debug_extensions
 enable_orafce
 enable_debug
@@ -887,6 +886,7 @@ with_tcl
 with_tclconfig
 with_perl
 with_python
+with_pythonsrc_ext
 with_gssapi
 with_krb_srvnam
 with_pam
@@ -1563,7 +1563,6 @@ Optional Features:
   --disable-atomics       do not use atomic operations
   --disable-strong-random do not use a strong random number source
   --disable-gpfdist       do not use gpfdist
-  --disable-pxf           do not build pxf
   --disable-debug-extensions
                           exclude debug extensions in gpcontrib
   --enable-orafce         build with Oracle compatibility functions
@@ -1593,10 +1592,10 @@ Optional Packages:
   --with-libs=DIRS        alternative spelling of --with-libraries
   --with-pgport=PORTNUM   set default port number [5432]
   --with-blocksize=BLOCKSIZE
-                          set table block size in kB [8]
+                          set table block size in kB [32]
   --with-segsize=SEGSIZE  set table segment size in GB [1]
   --with-wal-blocksize=BLOCKSIZE
-                          set WAL block size in kB [8]
+                          set WAL block size in kB [32]
   --with-CC=CMD           set compiler (deprecated)
   --with-llvm             build with LLVM based JIT support
   --with-icu              build with ICU support
@@ -1604,6 +1603,7 @@ Optional Packages:
   --with-tclconfig=DIR    tclConfig.sh is in DIR
   --with-perl             build Perl modules (PL/Perl)
   --without-python        build Python modules (PL/Python)
+  --with-pythonsrc-ext    build Python modules for gpMgmt
   --with-gssapi           build with GSSAPI support
   --with-krb-srvnam=NAME  default service principal name in Kerberos (GSSAPI)
                           [postgres]
@@ -3375,34 +3375,6 @@ if test "${enable_gpfdist+set}" = set; then :
 
 else
   enable_gpfdist=yes
-
-fi
-
-
-
-
-#
-# pxf
-#
-
-
-# Check whether --enable-pxf was given.
-if test "${enable_pxf+set}" = set; then :
-  enableval=$enable_pxf;
-  case $enableval in
-    yes)
-      :
-      ;;
-    no)
-      :
-      ;;
-    *)
-      as_fn_error $? "no argument expected for --enable-pxf option" "$LINENO" 5
-      ;;
-  esac
-
-else
-  enable_pxf=yes
 
 fi
 
@@ -8623,6 +8595,40 @@ $as_echo "$with_python" >&6; }
 
 
 #
+# Optionally build Python modules for gpMgmt
+#
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to build Python modules for gpMgmt" >&5
+$as_echo_n "checking whether to build Python modules for gpMgmt... " >&6; }
+
+
+
+# Check whether --with-pythonsrc-ext was given.
+if test "${with_pythonsrc_ext+set}" = set; then :
+  withval=$with_pythonsrc_ext;
+  case $withval in
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      as_fn_error $? "no argument expected for --with-pythonsrc-ext option" "$LINENO" 5
+      ;;
+  esac
+
+else
+  with_pythonsrc_ext=no
+
+fi
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $with_pythonsrc_ext" >&5
+$as_echo "$with_pythonsrc_ext" >&6; }
+
+
+
+#
 # GSSAPI
 #
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to build with GSSAPI support" >&5
@@ -9502,7 +9508,7 @@ fi
 
 
 #
-# libcurl. Used for external table support and the PXF extension
+# libcurl. Used for external table support
 #
 
 
@@ -9529,10 +9535,6 @@ fi
 
 
 
-
-if test "$with_libcurl" = "no" && test "$enable_pxf" = "yes"; then
-  as_fn_error $? "libcurl is required by PXF" "$LINENO" 5
-fi
 
 if test "$with_libcurl" = "no" && test "$enable_gpcloud" = "yes"; then
   as_fn_error $? "libcurl is required by gpcloud" "$LINENO" 5

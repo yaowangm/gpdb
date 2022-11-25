@@ -4947,7 +4947,7 @@ int get_num_guc_variables(void)
 /*
  * gp_guc_list_init
  *
- * Builds global lists of interesting GUCs for use with gp_guc_list_show()...
+ * Builds global lists of interesting GUCs...
  *
  * - gp_guc_list_for_explain: consists of planner GUCs, plus 'work_mem'
  * - gp_guc_list_for_no_plan: planner method enables for cdb_no_plan_for_query().
@@ -5002,41 +5002,6 @@ gp_guc_list_init(void)
             gp_guc_list_for_no_plan = lappend(gp_guc_list_for_no_plan, gconf);
 	}
 }                               /* gp_guc_list_init */
-
-
-/*
- * gp_guc_list_show
- *
- * Given a list of GUCs (a List of struct config_generic), construct a list
- * of human-readable strings of the option names and current values, skipping
- * any whose source <= 'excluding'.
- */
-List *
-gp_guc_list_show(GucSource excluding, List *guclist)
-{
-	List	   *options = NIL;
-	ListCell   *cell;
-	char	   *value;
-	char	 	buf[NAMEDATALEN];
-
-	foreach(cell, guclist)
-	{
-		struct config_generic *gconf = (struct config_generic *) lfirst(cell);
-
-		if (gconf->source > excluding)
-        {
-            value = _ShowOption(gconf, true);
-			snprintf(buf, sizeof(buf), "%s=%s", gconf->name, value);
-			options = lappend(options, pstrdup(buf));
-
-			memset(&buf, '\0', sizeof(buf));
-            pfree(value);
-        }
-	}
-
-	return options;
-}
-
 
 /*
  * Build the sorted array.  This is split out so that it could be
@@ -6306,8 +6271,8 @@ BeginReportingGUCOptions(void)
 {
 	int			i;
 
-    /* Build global lists of GUCs for use by callers of gp_guc_list_show(). */
-    gp_guc_list_init();
+	/* Build global lists of GUCs for use. */
+	gp_guc_list_init();
 
 	/*
 	 * Don't do anything unless talking to an interactive frontend of protocol
@@ -9364,6 +9329,60 @@ ShowAllGUCConfig(DestReceiver *dest)
 }
 
 /*
+ * return if the option were modified (w.r.t. config file)
+ */
+bool is_guc_modified(struct config_generic *conf)
+{
+	switch (conf->vartype)
+	{
+		case PGC_BOOL:
+			{
+				struct config_bool *lconf = (struct config_bool *) conf;
+
+				return (lconf->boot_val != *(lconf->variable));
+			}
+			break;
+
+		case PGC_INT:
+			{
+				struct config_int *lconf = (struct config_int *) conf;
+
+				return (lconf->boot_val != *(lconf->variable));
+			}
+			break;
+
+		case PGC_REAL:
+			{
+				struct config_real *lconf = (struct config_real *) conf;
+
+				return (lconf->boot_val != *(lconf->variable));
+			}
+			break;
+
+		case PGC_STRING:
+			{
+				struct config_string *lconf = (struct config_string *) conf;
+
+				return (strcmp(lconf->boot_val, *(lconf->variable)) != 0);
+			}
+			break;
+
+		case PGC_ENUM:
+			{
+				struct config_enum *lconf = (struct config_enum *) conf;
+
+				return (lconf->boot_val != *(lconf->variable));
+			}
+			break;
+
+		default:
+			elog(ERROR, "unexpected GUC type: %d", conf->vartype);
+	}
+
+	return false;
+}
+
+/*
  * Returns an array of modified GUC options to show in EXPLAIN. Only options
  * related to query planning (marked with GUC_EXPLAIN), with values different
  * from built-in defaults.
@@ -9385,7 +9404,6 @@ get_explain_guc_options(int *num)
 
 	for (i = 0; i < num_guc_variables; i++)
 	{
-		bool		modified;
 		struct config_generic *conf = guc_variables[i];
 
 		/* return only options visible to the user */
@@ -9398,57 +9416,8 @@ get_explain_guc_options(int *num)
 		if (!(conf->flags & GUC_EXPLAIN))
 			continue;
 
-		/* return only options that were modified (w.r.t. config file) */
-		modified = false;
-
-		switch (conf->vartype)
-		{
-			case PGC_BOOL:
-				{
-					struct config_bool *lconf = (struct config_bool *) conf;
-
-					modified = (lconf->boot_val != *(lconf->variable));
-				}
-				break;
-
-			case PGC_INT:
-				{
-					struct config_int *lconf = (struct config_int *) conf;
-
-					modified = (lconf->boot_val != *(lconf->variable));
-				}
-				break;
-
-			case PGC_REAL:
-				{
-					struct config_real *lconf = (struct config_real *) conf;
-
-					modified = (lconf->boot_val != *(lconf->variable));
-				}
-				break;
-
-			case PGC_STRING:
-				{
-					struct config_string *lconf = (struct config_string *) conf;
-
-					modified = (strcmp(lconf->boot_val, *(lconf->variable)) != 0);
-				}
-				break;
-
-			case PGC_ENUM:
-				{
-					struct config_enum *lconf = (struct config_enum *) conf;
-
-					modified = (lconf->boot_val != *(lconf->variable));
-				}
-				break;
-
-			default:
-				elog(ERROR, "unexpected GUC type: %d", conf->vartype);
-		}
-
 		/* skip GUC variables that match the built-in default */
-		if (!modified)
+		if (!is_guc_modified(conf))
 			continue;
 
 		/* assign to the values array */

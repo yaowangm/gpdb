@@ -401,19 +401,6 @@ cdb_create_multistage_grouping_paths(PlannerInfo *root,
 		List	   *gcls;
 		List	   *tlist;
 
-		/* GPDB_12_MERGE_FIXME: For now, bail out if there are any unsortable
-		 * refs. PostgreSQL supports hashing with grouping sets nowadays, but
-		 * the code in this file hasn't been updated to deal with it yet.
-		 */
-		ListCell   *lc;
-		foreach(lc, parse->groupClause)
-		{
-			SortGroupClause *gc = lfirst_node(SortGroupClause, lc);
-
-			if (!OidIsValid(gc->sortop))
-				return;
-		}
-
 		gsetid = makeNode(GroupingSetId);
 		grouping_sets_tlist = copyObject(root->processed_tlist);
 		ctx.gsetid_sortref = add_gsetid_tlist(grouping_sets_tlist);
@@ -905,9 +892,7 @@ static void
 											  NIL,
 											  AGG_SORTED,
 											  ctx->rollups,
-											  ctx->agg_partial_costs,
-											  estimate_num_groups_on_segment(ctx->dNumGroupsTotal,
-																			 path->rows, path->locus));
+											  ctx->agg_partial_costs);
 		add_path(ctx->partial_rel, first_stage_agg_path);
 	}
 	else if (ctx->hasAggs || ctx->groupClause)
@@ -1053,10 +1038,6 @@ add_first_stage_hash_agg_path(PlannerInfo *root,
 	dNumGroups = estimate_num_groups_on_segment(ctx->dNumGroupsTotal,
 												path->rows, path->locus);
 
-	/*
-	 * FIXME:
-	 * Shall we compute hash table size and compare with work_mem here?
-	 */
 
 	if (parse->groupingSets && ctx->new_rollups)
 	{
@@ -1068,8 +1049,7 @@ add_first_stage_hash_agg_path(PlannerInfo *root,
 											  NIL,
 											  ctx->strat,
 											  ctx->new_rollups,
-											  ctx->agg_partial_costs,
-											  dNumGroups);
+											  ctx->agg_partial_costs);
 		CdbPathLocus_MakeStrewn(&(first_stage_agg_path->locus),
 								CdbPathLocus_NumSegments(first_stage_agg_path->locus));
 		add_path(ctx->partial_rel, first_stage_agg_path);
@@ -2051,12 +2031,29 @@ fetch_multi_dqas_info(PlannerInfo *root,
 			arg_tle = get_sortgroupclause_tle(arg_sortcl, aggref->args);
 			ListCell    *lc3;
 			int         dqa_idx = 0;
+			Expr		*naked_tle_expr = arg_tle->expr;
+
+			/*
+			 * When conversions between two binary-compatible types happen in
+			 * DQA expressions, the expr(s) in arg_tle and proj_target->exprs
+			 * may be wrapped with a RelabelType node. The RelabelType node doesn't
+			 * affect the semantics, so we ignore it here.
+			 * For conversions that are not binary-compatible, the exprs are wrapped
+			 * with other types of node, e.g., CoerceViaIO.
+			 * Relevent bug report: https://github.com/greenplum-db/gpdb/issues/14096
+			 */
+			while (naked_tle_expr && IsA(naked_tle_expr, RelabelType))
+				naked_tle_expr = ((RelabelType *) naked_tle_expr)->arg;
 
 			foreach (lc3, proj_target->exprs)
 			{
 				Expr    *expr = lfirst(lc3);
+				Expr	*naked_expr = expr;
+				/* Ignore the RelabelType node. */
+				while (naked_expr && IsA(naked_expr, RelabelType))
+					naked_expr = ((RelabelType *) naked_expr)->arg;
 
-				if (equal(arg_tle->expr, expr))
+				if (equal(naked_tle_expr, naked_expr))
 					break;
 
 				dqa_idx++;

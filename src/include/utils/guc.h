@@ -247,7 +247,7 @@ typedef enum
 #define GUC_GPDB_NEED_SYNC     0x00400000  /* guc value is synced between master and primary */
 #define GUC_GPDB_NO_SYNC       0x00800000  /* guc value is not synced between master and primary */
 
-/* GUC lists for gp_guc_list_show().  (List of struct config_generic) */
+/* GUC lists for gp_guc_list_init().  (List of struct config_generic) */
 extern List    *gp_guc_list_for_explain;
 extern List    *gp_guc_list_for_no_plan;
 
@@ -313,7 +313,7 @@ extern bool Debug_resource_group;
 extern bool gp_create_table_random_default_distribution;
 extern bool gp_allow_non_uniform_partitioning_ddl;
 extern int  dtx_phase2_retry_second;
-
+extern bool gp_log_suboverflow_statement;
 /* WAL replication debug gucs */
 extern bool debug_walrepl_snd;
 extern bool debug_walrepl_syncrep;
@@ -325,7 +325,6 @@ extern int rep_lag_avoidance_threshold;
 extern bool gp_maintenance_mode;
 extern bool gp_maintenance_conn;
 extern bool allow_segment_DML;
-extern bool gp_allow_rename_relation_without_lock;
 
 extern bool gp_ignore_error_table;
 
@@ -491,7 +490,6 @@ extern bool optimizer_enable_constant_expression_evaluation;
 extern bool optimizer_enable_bitmapscan;
 extern bool optimizer_enable_outerjoin_to_unionall_rewrite;
 extern bool optimizer_enable_ctas;
-extern bool optimizer_enable_partial_index;
 extern bool optimizer_enable_dml;
 extern bool	optimizer_enable_dml_constraints;
 extern bool optimizer_enable_direct_dispatch;
@@ -509,6 +507,7 @@ extern bool optimizer_enable_mergejoin;
 extern bool optimizer_prune_unused_columns;
 extern bool optimizer_enable_redistribute_nestloop_loj_inner_child;
 extern bool optimizer_force_comprehensive_join_implementation;
+extern bool optimizer_enable_replicated_table;
 
 /* Optimizer plan enumeration related GUCs */
 extern bool optimizer_enumerate_plans;
@@ -613,12 +612,12 @@ typedef enum
 extern IndexCheckType gp_indexcheck_insert;
 
 /* Storage option names */
-#define SOPT_APPENDONLY    "appendonly"
 #define SOPT_FILLFACTOR    "fillfactor"
 #define SOPT_BLOCKSIZE     "blocksize"
 #define SOPT_COMPTYPE      "compresstype"
 #define SOPT_COMPLEVEL     "compresslevel"
 #define SOPT_CHECKSUM      "checksum"
+#define SOPT_ANALYZEHLL    "analyze_hll_non_part_table"
 
 /*
  * Functions exported by guc.c
@@ -735,8 +734,6 @@ extern ArrayType *GUCArrayDelete(ArrayType *array, const char *name);
 extern ArrayType *GUCArrayReset(ArrayType *array);
 
 extern void pg_timezone_abbrev_initialize(void);
-
-extern List *gp_guc_list_show(GucSource excluding, List *guclist);
 
 extern struct config_generic *find_option(const char *name,
 				bool create_placeholders, int elevel);

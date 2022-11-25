@@ -10,7 +10,7 @@ Each database role is associated with a single resource queue; multiple roles ca
 
 When the user submits a query for execution, the query is evaluated against the resource queue's limits. If the query does not cause the queue to exceed its resource limits, then that query will run immediately. If the query causes the queue to exceed its limits \(for example, if the maximum number of active statement slots are currently in use\), then the query must wait until queue resources are free before it can run. Queries are evaluated on a first in, first out basis. If query prioritization is enabled, the active workload on the system is periodically assessed and processing resources are reallocated according to query priority \(see [How Priorities Work](#priorities)\). Roles with the `SUPERUSER` attribute are exempt from resource queue limits. Superuser queries always run immediately regardless of limits imposed by their assigned resource queue.
 
-![](graphics/resource_queues.jpg "Resource Queue Process")
+![Resource Queue Process](graphics/resource_queues.jpg "Resource Queue Process")
 
 Resource queues define classes of queries with similar resource requirements. Administrators should create resource queues for the various types of workloads in their organization. For example, you could create resource queues for the following classes of queries, corresponding to different service level agreements:
 
@@ -61,7 +61,7 @@ The default resource queue, `pg_default`, allows a maximum of 20 active queries 
 
 The following illustration shows an example resource queue configuration for a Greenplum Database system with `gp_vmem_protect_limit` set to 8GB:
 
-![](graphics/resource_queue_examp.png "Resource Queue Configuration Example")
+![Resource Queue Configuration Example](graphics/resource_queue_examp.png "Resource Queue Configuration Example")
 
 This example has three classes of queries with different characteristics and service level agreements \(SLAs\). Three resource queues are configured for them. A portion of the segment memory is reserved as a safety margin.
 
@@ -122,7 +122,7 @@ For example, an administrator creates three resource queues: *adhoc* for ongoing
 
 At runtime, the CPU share of active statements is determined by these priority settings. If queries 1 and 2 from the reporting queue are running simultaneously, they have equal shares of CPU. When an ad-hoc query becomes active, it claims a smaller share of CPU. The exact share used by the reporting queries is adjusted, but remains equal due to their equal priority setting:
 
-![](graphics/gp_query_priority1.png "CPU share readjusted according to priority")
+![CPU share readjusted according to priority](graphics/gp_query_priority1.png "CPU share readjusted according to priority")
 
 **Note:**
 
@@ -130,7 +130,7 @@ The percentages shown in these illustrations are approximate. CPU usage between 
 
 When an executive query enters the group of running statements, CPU usage is adjusted to account for its maximum priority setting. It may be a simple query compared to the analyst and reporting queries, but until it is completed, it will claim the largest share of CPU.
 
-![](graphics/gp_query_priority2.png "CPU share readjusted for maximum priority query")
+![CPU share readjusted for maximum priority query](graphics/gp_query_priority2.png "CPU share readjusted for maximum priority query")
 
 For more information about commands to set priorities, see [Setting Priority Levels](#topic16).
 
@@ -220,9 +220,9 @@ This means that for all roles assigned to the *adhoc* resource queue, only three
 
 ### <a id="topic12"></a>Creating Queues with Memory Limits 
 
-Resource queues with a `MEMORY_LIMIT`setting control the amount of memory for all the queries submitted through the queue. The total memory should not exceed the physical memory available per-segment. Set`MEMORY_LIMIT` to 90% of memory available on a per-segment basis. For example, if a host has 48 GB of physical memory and 6 segment instances, then the memory available per segment instance is 8 GB. You can calculate the recommended `MEMORY_LIMIT` for a single queue as 0.90\*8=7.2 GB. If there are multiple queues created on the system, their total memory limits must also add up to 7.2 GB.
+Resource queues with a `MEMORY_LIMIT` setting control the amount of memory for all the queries submitted through the queue. The total memory should not exceed the physical memory available per-segment. Set `MEMORY_LIMIT` to 90% of memory available on a per-segment basis. For example, if a host has 48 GB of physical memory and 6 segment instances, then the memory available per segment instance is 8 GB. You can calculate the recommended `MEMORY_LIMIT` for a single queue as 0.90\*8=7.2 GB. If there are multiple queues created on the system, their total memory limits must also add up to 7.2 GB.
 
-When used in conjunction with `ACTIVE_STATEMENTS`, the default amount of memory allotted per query is: `MEMORY_LIMIT``/``ACTIVE_STATEMENTS`. When used in conjunction with `MAX_COST`, the default amount of memory allotted per query is: `MEMORY_LIMIT * (query_cost `/`MAX_COST)`. Use `MEMORY_LIMIT` in conjunction with `ACTIVE_STATEMENTS` rather than with `MAX_COST`.
+When used in conjunction with `ACTIVE_STATEMENTS`, the default amount of memory allotted per query is: `MEMORY_LIMIT / ACTIVE_STATEMENTS`. When used in conjunction with `MAX_COST`, the default amount of memory allotted per query is: `MEMORY_LIMIT * (query_cost / MAX_COST)`. Use `MEMORY_LIMIT` in conjunction with `ACTIVE_STATEMENTS` rather than with `MAX_COST`.
 
 For example, to create a resource queue with an active query limit of 10 and a total memory limit of 2000MB \(each query will be allocated 200MB of segment host memory at execution time\):
 
@@ -358,7 +358,7 @@ stats_queue_level = on
 
 ```
 
-Once this is enabled, you can use the `pg_stat_resqueues` system view to see the statistics collected on resource queue usage. Note that enabling this feature does incur slight performance overhead, as each query submitted through a resource queue must be tracked. It may be useful to enable statistics collecting on resource queues for initial diagnostics and administrative planning, and then disable the feature for continued use.
+Once this is enabled, you can use the `pg_stat_resqueues` system view to see the statistics collected on resource queue usage. Note that enabling this feature does incur slight performance overhead, as each query submitted through a resource queue must be tracked. It may be useful to enable statistics collecting on resource queues for initial diagnostics and administrative planning, and then deactivate the feature for continued use.
 
 See the Statistics Collector section in the PostgreSQL documentation for more information about collecting statistics in Greenplum Database.
 

@@ -185,11 +185,6 @@ main(int argc, char **argv)
 
 	if (is_greenplum_dispatcher_mode())
 	{
-		/*
-		 * GPDB_12_MERGE_FIXME: this is where we used to create new databases
-		 * in case we were the dispatcher, now upstream does prepare_new_globals.
-		 * Verify that this replacement is what we want.
-		 */
 		prepare_new_globals();
 
 		create_new_objects();
@@ -608,7 +603,8 @@ create_new_objects(void)
 	/* update new_cluster info now that we have objects in the databases */
 	get_db_and_rel_infos(&new_cluster);
 
-	after_create_new_objects_greenplum();
+	/* TODO: Bitmap indexes are not supported, so mark them as invalid. */
+	new_gpdb_invalidate_bitmap_indexes();
 }
 
 
@@ -680,6 +676,18 @@ copy_xact_xlog_xid(void)
 					  "pg_clog" : "pg_xact",
 					  GET_MAJOR_VERSION(new_cluster.major_version) < 1000 ?
 					  "pg_clog" : "pg_xact");
+
+	/*
+	 * GPDB: FIXME: If we want to support upgrades from 5X -> 7X and above, we
+	 * would need to construct the old_cluster.controldata.chkpnt_oldstxid
+	 * ourselves as the 5X control file doesn't carry that field.
+	 */
+	prep_status("Setting oldest XID for new cluster");
+	exec_prog(UTILITY_LOG_FILE, NULL, true, true,
+			  "\"%s/pg_resetwal\" --binary-upgrade -f -u %u \"%s\"",
+			  new_cluster.bindir, old_cluster.controldata.chkpnt_oldstxid,
+			  new_cluster.pgdata);
+	check_ok();
 
 	/* set the next transaction id and epoch of the new cluster */
 	prep_status("Setting next transaction ID and epoch for new cluster");

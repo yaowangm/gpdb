@@ -1834,6 +1834,30 @@ CREATE VIEW gp_toolkit.gp_resgroup_status_per_segment AS
 GRANT SELECT ON gp_toolkit.gp_resgroup_status_per_segment TO public;
 
 --------------------------------------------------------------------------------
+-- @view:
+--        gp_toolkit.gp_resgroup_role
+--
+-- @doc:
+--        Assigned resource group to roles
+--
+--------------------------------------------------------------------------------
+
+CREATE VIEW gp_toolkit.gp_resgroup_role
+AS
+    SELECT
+        pgr.rolname AS rrrolname,
+		pgrg.rsgname AS rrrsgname
+	FROM
+		pg_catalog.pg_roles pgr
+	JOIN
+		pg_catalog.pg_resgroup pgrg
+	ON
+		pgr.rolresgroup = pgrg.oid
+	;
+
+GRANT SELECT ON gp_toolkit.gp_resgroup_role TO public;
+
+--------------------------------------------------------------------------------
 -- AO/CO diagnostics functions
 --------------------------------------------------------------------------------
 
@@ -1879,6 +1903,16 @@ RETURNS TABLE(segment_id integer,
 AS '$libdir/gp_ao_co_diagnostics' , 'gp_aocsseg_history_wrapper'
 LANGUAGE C STRICT EXECUTE ON ALL SEGMENTS;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aocsseg_history(regclass) TO public;
+
+CREATE FUNCTION gp_toolkit.__gp_aoblkdir(regclass)
+RETURNS TABLE (tupleid tid,
+    segno integer,
+    columngroup_no integer,
+    entry_no integer,
+    first_row_no bigint,
+    file_offset bigint,
+    row_count bigint)
+AS '$libdir/gp_ao_co_diagnostics.so', 'gp_aoblkdir_wrapper' LANGUAGE C STRICT;
 
 CREATE FUNCTION gp_toolkit.__gp_aovisimap(regclass)
 RETURNS TABLE (tid tid,

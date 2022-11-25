@@ -1246,8 +1246,7 @@ CTranslatorExprToDXLUtils::SetDirectDispatchInfo(
 	GPOS_ASSERT(nullptr != pdrgpdsBaseTables);
 
 	Edxlopid edxlopid = dxlnode->GetOperator()->GetDXLOperator();
-	if (EdxlopPhysicalCTAS == edxlopid || EdxlopPhysicalDML == edxlopid ||
-		EdxlopPhysicalRowTrigger == edxlopid)
+	if (EdxlopPhysicalCTAS == edxlopid || EdxlopPhysicalDML == edxlopid)
 	{
 		// direct dispatch for CTAS and DML handled elsewhere
 		// TODO:  - Oct 15, 2014; unify
@@ -1416,18 +1415,21 @@ CTranslatorExprToDXLUtils::PdxlddinfoSingleDistrKey(CMemoryPool *mp,
 	BOOL useRawValues = false;
 	CConstraint *pcnstrDistrCol = pcnstr->Pcnstr(mp, pcrDistrCol);
 	CConstraintInterval *pcnstrInterval;
-	if (pcnstrDistrCol == nullptr &&
-		(pcnstrInterval = dynamic_cast<CConstraintInterval *>(pcnstr)))
+	// Avoid direct dispatch when pcnstrDistrCol specifies a constant column
+	if (!CPredicateUtils::FConstColumn(pcnstrDistrCol, pcrDistrCol) &&
+		(pcnstrInterval = dynamic_cast<CConstraintInterval *>(
+			 pcnstr->GetConstraintOnSegmentId())) != nullptr)
 	{
-		if (pcnstrInterval->FConstraintOnSegmentId())
+		if (pcnstrDistrCol != nullptr)
 		{
-			// If the constraint is on gp_segment_id then we trick ourselves into
-			// considering the constraint as being on a distribution column.
-			pcnstrDistrCol = pcnstr;
-			pcnstrDistrCol->AddRef();
-			pcrDistrCol = pcnstrInterval->Pcr();
-			useRawValues = true;
+			pcnstrDistrCol->Release();
 		}
+		// If the constraint is on gp_segment_id then we trick ourselves into
+		// considering the constraint as being on a distribution column.
+		pcnstrDistrCol = pcnstrInterval;
+		pcnstrDistrCol->AddRef();
+		pcrDistrCol = pcnstrInterval->Pcr();
+		useRawValues = true;
 	}
 
 	CDXLDatum2dArray *pdrgpdrgpdxldatum = nullptr;
@@ -1805,7 +1807,9 @@ CTranslatorExprToDXLUtils::FMotionHazard(CMemoryPool *mp, CDXLNode *dxlnode,
 	// non-streaming operator/Gather motion neutralizes any motion hazard that its subtree imposes
 	// hence stop recursing further
 	if (FMotionHazardSafeOp(dxlnode))
+	{
 		return false;
+	}
 
 	if (FDXLOpExists(dxlnode->GetOperator(), peopid, ulOps))
 	{
@@ -1866,7 +1870,9 @@ CTranslatorExprToDXLUtils::FMotionHazardSafeOp(CDXLNode *dxlnode)
 			CDXLPhysicalAgg *pdxlnPhysicalAgg =
 				CDXLPhysicalAgg::Cast(dxlnode->GetOperator());
 			if (pdxlnPhysicalAgg->GetAggStrategy() == EdxlaggstrategyHashed)
+			{
 				fMotionHazardSafeOp = true;
+			}
 		}
 		break;
 

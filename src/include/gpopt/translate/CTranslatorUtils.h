@@ -48,7 +48,7 @@ namespace gpopt
 class CMDAccessor;
 
 // dynamic array of bitsets
-typedef CDynamicPtrArray<CBitSet, CleanupRelease> CBitSetArray;
+using CBitSetArray = CDynamicPtrArray<CBitSet, CleanupRelease>;
 }  // namespace gpopt
 
 namespace gpdxl
@@ -109,8 +109,17 @@ private:
 		CMemoryPool *mp, const GroupingSet *grouping_set, ULONG num_cols,
 		CBitSet *group_cols, UlongToUlongMap *group_col_pos);
 
+	// create a set of grouping sets for a cube
+	static CBitSetArray *CreateGroupingSetsForCube(
+		CMemoryPool *mp, const GroupingSet *grouping_set, ULONG num_cols,
+		CBitSet *group_cols, UlongToUlongMap *group_col_pos);
+
 	// create a set of grouping sets for a grouping sets subclause
 	static CBitSetArray *CreateGroupingSetsForSets(
+		CMemoryPool *mp, const GroupingSet *grouping_set_node, ULONG num_cols,
+		CBitSet *group_cols, UlongToUlongMap *group_col_pos);
+
+	static CBitSetArray *CreateGroupingSetsForSimple(
 		CMemoryPool *mp, const GroupingSet *grouping_set_node, ULONG num_cols,
 		CBitSet *group_cols, UlongToUlongMap *group_col_pos);
 
@@ -131,18 +140,9 @@ public:
 	// get the opfamily for index key
 	static OID GetOpFamilyForIndexQual(INT attno, OID oid_index);
 
-	// return the type for the system column with the given number
-	static CMDIdGPDB *GetSystemColType(CMemoryPool *mp, AttrNumber attno);
-
 	// find the n-th column descriptor in the table descriptor
 	static const CDXLColDescr *GetColumnDescrAt(
 		const CDXLTableDescr *table_descr, ULONG pos);
-
-	// return the name for the system column with given number
-	static const CWStringConst *GetSystemColName(AttrNumber attno);
-
-	// returns the length for the system column with given attno number
-	static const ULONG GetSystemColLength(AttrNumber attno);
 
 	// translate the join type from its GPDB representation into the DXL one
 	static EdxlJoinType ConvertToDXLJoinType(JoinType jt);
