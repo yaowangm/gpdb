@@ -24,6 +24,19 @@ typedef enum BitmapCompressionFlag
 	BITMAP_COMPRESSION_FLAG_RAW = 0x03
 } BitmapCompressionFlag;
 
+typedef struct BitmapCompressBlockData
+{
+	Bitstream *bitstream;
+	uint32 blockData;
+	bool isFirstBlock;
+	uint32 lastBlockData;
+	int lastBlockFlag;
+	int rleRepeatCount;
+} BitmapCompressBlockData;
+
+static bool
+Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData);
+
 /*
  * Initializes a new decompression run
  */ 
@@ -216,61 +229,22 @@ Bitmap_Compress_Default(
 		int blockCount,
 		Bitstream *bitstream)
 {
-	uint32 lastBlockData;
-	int lastBlockFlag;
-	int rleRepeatCount;
-	int i;
+	BitmapCompressBlockData compBlockData = {0};
 
-	lastBlockData = 0;
-	lastBlockFlag = 0;
-	rleRepeatCount = 0;
-	for (i = 0; i < blockCount; i++)
+	for (int i = 0; i < blockCount; i++)
 	{
-		uint32 blockData = bitmap[i];
-		if (blockData == lastBlockData && rleRepeatCount <= 255 && i > 0)
+		compBlockData.blockData = bitmap[i];
+		if(!Bitmap_CompressBlock(&compBlockData))
 		{
-			rleRepeatCount++;
-		}
-		else
-		{
-			if (rleRepeatCount > 0)
-			{
-				if (!Bitmap_EncodeRLE(bitstream, rleRepeatCount,
-						lastBlockFlag))
-					return false;
-				rleRepeatCount = 0;
-			}
-
-			if (blockData == 0)
-			{
-				if (!Bitstream_Put(bitstream, BITMAP_COMPRESSION_FLAG_ZERO, 2))
-					return false;
-				lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
-			}
-			else if (blockData == 0xFFFFFFFFU)
-			{
-				if (!Bitstream_Put(bitstream, BITMAP_COMPRESSION_FLAG_ONE, 2))
-					return false;
-				lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
-			}
-			else
-			{
-				if (!Bitstream_Put(bitstream, BITMAP_COMPRESSION_FLAG_RAW, 2))
-					return false;
-				if (!Bitstream_Put(bitstream, blockData, 32))
-					return false;
-				lastBlockFlag = BITMAP_COMPRESSION_FLAG_RAW;
-			}
-
-			lastBlockData = blockData;
+			return false;
 		}
 	}
 
 	/* Write last RLE block */
-	if (rleRepeatCount > 0)
+	if (compBlockData.rleRepeatCount > 0)
 	{
-		if (!Bitmap_EncodeRLE(bitstream, rleRepeatCount,
-					lastBlockFlag))
+		if (!Bitmap_EncodeRLE(bitstream, compBlockData.rleRepeatCount,
+					compBlockData.lastBlockFlag))
 			return false;
 	}
 	return true;
@@ -355,5 +329,68 @@ Bitmap_Compress(
 			elog(ERROR, "illegal compression type during bitmap compression: "
 				"compression type %d", compressionType);
 			return 0;
+	}
+}
+
+static bool
+Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
+{
+	if (compBlockData->blockData == compBlockData->lastBlockData
+		&& compBlockData->rleRepeatCount <= 255
+		&& !compBlockData->isFirstBlock)
+	{
+		(compBlockData->rleRepeatCount)++;
+	}
+	else
+	{
+		if (compBlockData->rleRepeatCount > 0)
+		{
+			if (!Bitmap_EncodeRLE(compBlockData->bitstream,
+								  compBlockData->rleRepeatCount,
+								  compBlockData->lastBlockFlag))
+			{
+				return false;
+			}
+			compBlockData->rleRepeatCount = 0;
+		}
+
+		if (compBlockData->blockData == 0)
+		{
+			if (!Bitstream_Put(compBlockData->bitstream,
+							   BITMAP_COMPRESSION_FLAG_ZERO,
+							   2))
+			{
+				return false;
+			}
+			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
+		}
+		else if (compBlockData->blockData == 0xFFFFFFFFU)
+		{
+			if (!Bitstream_Put(compBlockData->bitstream,
+							   BITMAP_COMPRESSION_FLAG_ONE,
+							   2))
+			{
+				return false;
+			}
+			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
+		}
+		else
+		{
+			if (!Bitstream_Put(compBlockData->bitstream,
+							   BITMAP_COMPRESSION_FLAG_RAW,
+							   2))
+			{
+				return false;
+			}
+			if (!Bitstream_Put(compBlockData->bitstream,
+							   compBlockData->blockData,
+							   32))
+			{
+				return false;
+			}
+			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_RAW;
+		}
+
+		compBlockData->lastBlockData = compBlockData->blockData;
 	}
 }
