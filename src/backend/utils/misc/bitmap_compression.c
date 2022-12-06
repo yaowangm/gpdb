@@ -231,12 +231,45 @@ Bitmap_Compress_Default(
 {
 	BitmapCompressBlockData compBlockData = {0};
 
-	for (int i = 0; i < blockCount; i++)
+	if (BITS_PER_BITMAPWORD == 32)
 	{
-		compBlockData.blockData = bitmap[i];
-		if(!Bitmap_CompressBlock(&compBlockData))
+		for (int i = 0; i < blockCount; i++)
 		{
-			return false;
+			compBlockData.blockData = bitmap[i];
+			if(!Bitmap_CompressBlock(&compBlockData))
+			{
+				return false;
+			}
+		}
+	}
+	else
+	{
+		Assert(BITS_PER_BITMAPWORD == 64);
+		/* For 64bit bms blockCount must be 0 or even number */
+		Assert(blockCount % 2 == 0);
+
+		for (int i = 0;i < blockCount; i += 2)
+		{
+			compBlockData.blockData = bitmap[i + 1];
+			if(!Bitmap_CompressBlock(&compBlockData))
+			{
+				return false;
+			}
+
+			/*
+			 * If it's the first block and the first half (32bit) is 0,
+			 * it means only one 32bit word actually. Skip the next half
+			 */
+			if(blockCount == 2 && (bitmap[i] >> 32) == 0)
+			{
+				break;
+			}
+
+			compBlockData.blockData = bitmap[i];
+			if(!Bitmap_CompressBlock(&compBlockData))
+			{
+				return false;
+			}
 		}
 	}
 
