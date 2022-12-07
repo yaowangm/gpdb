@@ -180,7 +180,7 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 		 * as bitmapDataSize since bitmap compression always uses 32 bit words.
 		 */
 		BitmapDecompress_Decompress(&decompressState,
-									visiMapEntry->bitmap->words,
+									(uint32 *)visiMapEntry->bitmap->words,
 									BITS_PER_BITMAPWORD == 64 ?
 										newWordCount * 2 : newWordCount);
 	}
@@ -286,20 +286,36 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	int	compressedBitmapSize = 0;
 	/* bitmap word count, in uint32-words */
 	int	bitmapWordCount = 0;
+	bool isOnly32bitOneWord = false;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
 	Assert(AppendOnlyVisimapEntry_IsValid(visiMapEntry));
 
-	bitmapSize = (visiMapEntry->bitmap ? (visiMapEntry->bitmap->nwords * sizeof(bitmapword)) : 0);
+	if (visiMapEntry->bitmap)
+	{
+		bitmapWordCount = visiMapEntry->bitmap->nwords;
+		if (BITS_PER_BITMAPWORD == 64
+			&& bitmapWordCount == 1
+			&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
+		{
+			isOnly32bitOneWord = true;
+			bitmapSize = sizeof(uint32);
+		}
+		else
+		{
+			bitmapSize = visiMapEntry->bitmap->nwords * sizeof(bitmapword);
+		}
+	}
 	bitmapSize += BITMAP_COMPRESSION_HEADER_SIZE;
+	Assert(bitmapWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	Assert(visiMapEntry->data);
 	if (bitmapSize > APPENDONLY_VISIMAP_DATA_BUFFER_SIZE)
 	{
 		elog(PANIC,
 			 "incorrect bitmapSize: "
-			 "APPENDONLY_VISIMAP_DATA_BUFFER_SIZE = %d, "
+			 "APPENDONLY_VISIMAP_DATA_BUFFER_SIZE = %lu, "
 			 "bitmapSize = %d, "
 			 "visiMapEntry->bitmap->nwords = %d",
 			 APPENDONLY_VISIMAP_DATA_BUFFER_SIZE,
@@ -308,23 +324,18 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	}
 	visiMapEntry->data->version = 1;
 
-	if (visiMapEntry->bitmap)
-	{
-		bitmapWordCount = visiMapEntry->bitmap->nwords;
-	}
-	Assert(bitmapWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
-
 	/*
 	 * bitmapDataSize required by Bitmap_Compress() is always in
 	 * uint32-words. So, if bitmapset uses 64 bit words, double
 	 * the value of bitmapWordCount.
 	 */
 	compressedBitmapSize = Bitmap_Compress(BITMAP_COMPRESSION_TYPE_DEFAULT,
-										   (visiMapEntry->bitmap ? visiMapEntry->bitmap->words : NULL),
+										   (visiMapEntry->bitmap ? (uint32*)visiMapEntry->bitmap->words : NULL),
 										   BITS_PER_BITMAPWORD == 64 ?
 											bitmapWordCount * 2 : bitmapWordCount,
 										   visiMapEntry->data->data,
-										   bitmapSize);
+										   bitmapSize,
+										   isOnly32bitOneWord);
 	Assert(compressedBitmapSize >= BITMAP_COMPRESSION_HEADER_SIZE);
 	SET_VARSIZE(visiMapEntry->data,
 				offsetof(AppendOnlyVisimapData, data) + compressedBitmapSize);
@@ -547,7 +558,7 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	if (minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT)
 	{
 		elog(PANIC,
-			 "incorrect minSize: offset=%d, minSize=%d",
+			 "incorrect minSize: offset=%ld, minSize=%u",
 			 offset,
 			 minSize);
 	}
