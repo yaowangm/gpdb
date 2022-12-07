@@ -230,6 +230,7 @@ Bitmap_Compress_Default(
 		Bitstream *bitstream)
 {
 	BitmapCompressBlockData compBlockData = {0};
+	compBlockData.bitstream = bitstream;
 
 	if (BITS_PER_BITMAPWORD == 32)
 	{
@@ -248,6 +249,8 @@ Bitmap_Compress_Default(
 		/* For 64bit bms blockCount must be 0 or even number */
 		Assert(blockCount % 2 == 0);
 
+#ifdef WORDS_BIGENDIAN
+
 		for (int i = 0;i < blockCount; i += 2)
 		{
 			compBlockData.blockData = bitmap[i + 1];
@@ -257,10 +260,10 @@ Bitmap_Compress_Default(
 			}
 
 			/*
-			 * If it's the first block and the first half (32bit) is 0,
-			 * it means only one 32bit word actually. Skip the next half
+			 * If blockCount is 2 and the first 32bit word is 0,
+			 * it means only one 32bit word actually. Skip the next word
 			 */
-			if(blockCount == 2 && (bitmap[i] >> 32) == 0)
+			if(blockCount == 2 && bitmap[0] == 0)
 			{
 				break;
 			}
@@ -271,6 +274,31 @@ Bitmap_Compress_Default(
 				return false;
 			}
 		}
+
+#else
+
+		for (int i = 0; i < blockCount; i++)
+		{
+			/*
+			 * If blockCount is 2 and the first 32bit word is 0,
+			 * it means only one 32bit word actually. Skip the next word
+			 */
+			if(blockCount == 2 &&
+			   i == 1 &&
+			   bitmap[1] == 0)
+			{
+				break;
+			}
+
+			compBlockData.blockData = bitmap[i];
+			if(!Bitmap_CompressBlock(&compBlockData))
+			{
+				return false;
+			}
+		}
+
+#endif
+
 	}
 
 	/* Write last RLE block */
