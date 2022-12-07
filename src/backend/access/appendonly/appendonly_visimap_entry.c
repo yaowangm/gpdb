@@ -165,6 +165,7 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 */
 	if (BITS_PER_BITMAPWORD == 64)
 	{
+		Assert(newWordCount % 2 == 0);
 		newWordCount /= 2;
 	}
 	Assert(newWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
