@@ -37,6 +37,13 @@ typedef struct BitmapCompressBlockData
 static bool
 Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData);
 
+static int
+Bitmap_Compress_Nocompress(
+		uint32* bitmap,
+		int blockCount,
+		bool isOnly32bitOneWord,
+		Bitstream *bitstream);
+
 /*
  * Initializes a new decompression run
  */ 
@@ -379,16 +386,10 @@ Bitmap_Compress(
 	switch (compressionType)
 	{
 		case BITMAP_COMPRESSION_TYPE_NO:
-			// By assertion I know that I have sufficient space for this
-			if (blockCount == 0)
-			{
-				/* we only have the header */
-				return 2;
-			}
-			memcpy(Bitstream_GetAlignedData(&bitstream, 16), 
-					bitmap, blockCount * sizeof(uint32));
-			
-			return (blockCount * sizeof(uint32)) + 2;
+			return Bitmap_Compress_Nocompress(bitmap,
+											  blockCount,
+											  isOnly32bitOneWord,
+											  &bitstream);
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
 			if (!Bitmap_Compress_Default(bitmap, blockCount, isOnly32bitOneWord,
 						&bitstream))
@@ -478,4 +479,58 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 		compBlockData->lastBlockData = compBlockData->blockData;
 	}
 	return true;
+}
+
+static int
+Bitmap_Compress_Nocompress(
+		uint32* bitmap,
+		int blockCount,
+		bool isOnly32bitOneWord,
+		Bitstream *bitstream)
+{
+	unsigned char *offset = 0;
+	int bitStreamLen = 0;
+
+	// By assertion I know that I have sufficient space for this
+	if (blockCount == 0)
+	{
+		/* we only have the header */
+		return 2;
+	}
+
+	offset = Bitstream_GetAlignedData(bitstream, 16);
+	if (BITS_PER_BITMAPWORD == 32)
+	{
+		memcpy(offset,
+			   bitmap,
+			   blockCount * sizeof(uint32));
+	}
+	else
+	{
+#ifdef WORDS_BIGENDIAN
+		for (int i = 0; i < blockCount; i += 2)
+		{
+			memcpy(offset,
+				   bitmap[i + 1],
+				   sizeof(uint32));
+			offset += sizeof(uint32);
+
+			if (isOnly32bitOneWord)
+				break;
+			memcpy(offset,
+				   bitmap[i],
+				   sizeof(uint32));
+			offset += sizeof(uint32);
+		}
+#else
+		memcpy(offset,
+			   bitmap,
+			   (isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32));
+#endif
+	}
+
+	bitStreamLen = ((isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32)) + 2;
+	//Assert(bitStreamLen == Bitstream_GetLength(bitstream));
+
+	return bitStreamLen;
 }
