@@ -336,28 +336,26 @@ int
 Bitmap_Compress(
 		BitmapCompressionType compressionType,
 		uint32* bitmap,
-		int bitmapDataSize,
+		int blockCount,
 		unsigned char *outData,
 		int maxOutDataSize,
 		bool isOnly32bitOneWord)
 {
 	Bitstream bitstream;
-	int blockCount = 0, onDiskBlockCount = 0;
+	int onDiskBlockCount = blockCount;
 
 	if (isOnly32bitOneWord)
 	{
 		Assert(BITS_PER_BITMAPWORD == 64);
 		Assert(maxOutDataSize == sizeof(uint32) + 2);
-		Assert(bitmapDataSize == 2);
+		Assert(blockCount == 2);
 	}
 	else
 	{
-		Assert(maxOutDataSize >= (bitmapDataSize * sizeof(uint32) + 2));
+		Assert(maxOutDataSize >= (blockCount * sizeof(uint32) + 2));
 	}
 
 	memset(outData, 0, maxOutDataSize);
-	blockCount = bitmapDataSize;
-	onDiskBlockCount = blockCount;
 
 	/*
 	 * On 64bit env, if there is only one 32bit word, blockCount should be 2
@@ -382,15 +380,15 @@ Bitmap_Compress(
 	{
 		case BITMAP_COMPRESSION_TYPE_NO:
 			// By assertion I know that I have sufficient space for this
-			if (bitmapDataSize == 0)
+			if (blockCount == 0)
 			{
 				/* we only have the header */
 				return 2;
 			}
 			memcpy(Bitstream_GetAlignedData(&bitstream, 16), 
-					bitmap, bitmapDataSize * sizeof(uint32));
+					bitmap, blockCount * sizeof(uint32));
 			
-			return (bitmapDataSize * sizeof(uint32)) + 2;
+			return (blockCount * sizeof(uint32)) + 2;
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
 			if (!Bitmap_Compress_Default(bitmap, blockCount, isOnly32bitOneWord,
 						&bitstream))
@@ -402,7 +400,7 @@ Bitmap_Compress(
 				return Bitmap_Compress(
 						BITMAP_COMPRESSION_TYPE_NO,
 						bitmap,
-						bitmapDataSize,
+						blockCount,
 						outData,
 						maxOutDataSize,
 						isOnly32bitOneWord);
