@@ -129,7 +129,8 @@ AppendOnlyVisimap_GetAttrNotNull(HeapTuple t, TupleDesc td, int attr)
 void
 AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t dataSize)
 {
-	int			newWordCount;
+	int			onDiskBlockCount = 0;
+	int			bmsWordCount = 0;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
@@ -156,7 +157,7 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 * but I think it is reasonable to set it to NULLL to avoid similar issues.
 	 */
 	visiMapEntry->bitmap = NULL;
-	newWordCount =
+	onDiskBlockCount =
 		BitmapDecompress_GetBlockCount(&decompressState);
 	/*
 	 * Bitmap compression always uses 32 bit words, and the result of
@@ -165,29 +166,35 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 */
 	if (BITS_PER_BITMAPWORD == 64)
 	{
-		Assert(newWordCount % 2 == 0);
-		newWordCount /= 2;
+		if (onDiskBlockCount == 1)
+		{
+			bmsWordCount = 1;
+		}
+		else
+		{
+			Assert(onDiskBlockCount % 2 == 0);
+			bmsWordCount = onDiskBlockCount / 2;
+		}
 	}
-	Assert(newWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
-	if (newWordCount > 0)
+	if (onDiskBlockCount > 0)
 	{
 		visiMapEntry->bitmap = palloc0(offsetof(Bitmapset, words) +
-									   (newWordCount * sizeof(bitmapword)));
-		visiMapEntry->bitmap->nwords = newWordCount;
+									   (bmsWordCount * sizeof(bitmapword)));
+		visiMapEntry->bitmap->nwords = bmsWordCount;
 		/*
 		 * If bitmapset uses 64 bit words, we need double newWordCount
 		 * as bitmapDataSize since bitmap compression always uses 32 bit words.
 		 */
 		BitmapDecompress_Decompress(&decompressState,
 									(uint32 *)visiMapEntry->bitmap->words,
-									BITS_PER_BITMAPWORD == 64 ?
-										newWordCount * 2 : newWordCount);
+									onDiskBlockCount);
 	}
-	else if (newWordCount != 0)
+	else if (onDiskBlockCount != 0)
 	{
 		elog(ERROR,
-			 "illegal visimap block count: visimap block count %d", newWordCount);
+			 "illegal visimap block count: visimap block count %d", onDiskBlockCount);
 	}
 
 }
