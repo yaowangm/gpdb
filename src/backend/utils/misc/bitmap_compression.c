@@ -497,11 +497,11 @@ Bitmap_Compress_Decompress(BitmapDecompressState *state,
 		{
 			if(i % 2 == 0)
 			{
-				nextPos = bitmap + i - 1;
+				nextPos = bitmap + i + 1;
 			}
 			else
 			{
-				nextPos = bitmap + i + 1;
+				nextPos = bitmap + i - 1;
 			}
 		}
 #else
