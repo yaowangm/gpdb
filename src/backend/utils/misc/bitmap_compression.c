@@ -186,6 +186,7 @@ Bitmap_Compress_Default(
 		for (int i = 0; i < blockCount; i++)
 		{
 			compBlockData.blockData = bitmap[i];
+			compBlockData.isFirstBlock = (i == 0);
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -203,6 +204,7 @@ Bitmap_Compress_Default(
 		for (int i = 0;i < blockCount; i += 2)
 		{
 			compBlockData.blockData = bitmap[i + 1];
+			compBlockData.isFirstBlock = (i == 0);
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -219,6 +221,7 @@ Bitmap_Compress_Default(
 			}
 
 			compBlockData.blockData = bitmap[i];
+			compBlockData.isFirstBlock = false;
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -230,6 +233,7 @@ Bitmap_Compress_Default(
 		for (int i = 0; i < blockCount; i++)
 		{
 			compBlockData.blockData = bitmap[i];
+			compBlockData.isFirstBlock = (i == 0);
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
