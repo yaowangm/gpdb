@@ -183,10 +183,6 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 		visiMapEntry->bitmap = palloc0(offsetof(Bitmapset, words) +
 									   (bmsWordCount * sizeof(bitmapword)));
 		visiMapEntry->bitmap->nwords = bmsWordCount;
-		/*
-		 * If bitmapset uses 64 bit words, we need double newWordCount
-		 * as bitmapDataSize since bitmap compression always uses 32 bit words.
-		 */
 		BitmapDecompress_Decompress(&decompressState,
 									(uint32 *)visiMapEntry->bitmap->words,
 									onDiskBlockCount);
