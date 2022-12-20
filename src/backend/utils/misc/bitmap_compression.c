@@ -596,7 +596,8 @@ Bitmap_Compress_NoDecompress(BitmapDecompressState *state,
 #ifdef WORDS_BIGENDIAN
 		/*
 		 * If we are using 64bit bms and it is a big-endian system, read the
-		 * data from bit stream and copy them to bms by an interlay order.
+		 * data from bit stream and copy them to bms in interlaced order, i.e.:
+		 * 0,1,3,2,5,4,...
 		 */
 		uint32 *offset = Bitstream_GetAlignedData(&state->bitstream, 16);
 		for (int i = 0; i < state->blockCount; i++)
