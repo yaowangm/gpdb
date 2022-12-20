@@ -180,13 +180,13 @@ Bitmap_Compress_Default(
 {
 	BitmapCompressBlockData compBlockData = {0};
 	compBlockData.bitstream = bitstream;
+	compBlockData.isFirstBlock = true;
 
 	if (BITS_PER_BITMAPWORD == 32)
 	{
 		for (int i = 0; i < blockCount; i++)
 		{
 			compBlockData.blockData = bitmap[i];
-			compBlockData.isFirstBlock = (i == 0);
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -204,7 +204,6 @@ Bitmap_Compress_Default(
 		for (int i = 0;i < blockCount; i += 2)
 		{
 			compBlockData.blockData = bitmap[i + 1];
-			compBlockData.isFirstBlock = (i == 0);
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -221,7 +220,6 @@ Bitmap_Compress_Default(
 			}
 
 			compBlockData.blockData = bitmap[i];
-			compBlockData.isFirstBlock = false;
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -233,7 +231,6 @@ Bitmap_Compress_Default(
 		for (int i = 0; i < blockCount; i++)
 		{
 			compBlockData.blockData = bitmap[i];
-			compBlockData.isFirstBlock = (i == 0);
 			if(!Bitmap_CompressBlock(&compBlockData))
 			{
 				return false;
@@ -373,6 +370,7 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 	}
 	else
 	{
+		compBlockData->isFirstBlock = false;
 		if (compBlockData->rleRepeatCount > 0)
 		{
 			if (!Bitmap_EncodeRLE(compBlockData->bitstream,
