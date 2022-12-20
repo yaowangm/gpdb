@@ -178,6 +178,11 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 			bmsWordCount = onDiskBlockCount / 2;
 		}
 	}
+	else
+	{
+		Assert(BITS_PER_BITMAPWORD == 32);
+		bmsWordCount = onDiskBlockCount;
+	}
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	if (onDiskBlockCount > 0)
