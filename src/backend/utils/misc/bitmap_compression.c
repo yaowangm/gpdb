@@ -304,8 +304,8 @@ Bitmap_Compress(
 	 * it is the same to blockCount (the block count of in-memory bms) because
 	 * both are in uint32 words. However, there is a special case:
 	 * On 64bit env, when there is only one 32bit word ondisk, blockCount should
-	 * be 2 since a 64bit word always has two 32bit word. We need to set
-	 * onDiskBlockCount = 1 for the case.
+	 * be 2 since a 64bit word always has two 32bit word. We need to explictly
+	 * set onDiskBlockCount = 1 for the case.
 	 */
 	int onDiskBlockCount = blockCount;
 
