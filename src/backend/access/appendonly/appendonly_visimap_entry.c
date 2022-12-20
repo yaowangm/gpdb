@@ -287,7 +287,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	/* bitmap size, in bytes */
 	int	bitmapSize = 0;
 	int	compressedBitmapSize = 0;
-	/* bitmap word count, in uint32-words */
+	/* bitmap word count */
 	int	bitmapWordCount = 0;
 	bool isOnly32bitOneWord = false;
 
@@ -298,6 +298,10 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	if (visiMapEntry->bitmap)
 	{
 		bitmapWordCount = visiMapEntry->bitmap->nwords;
+		/*
+		 * On 64bit env, if there is only one word in bms, and the last half
+		 * of the word is empty, it means there is only one 32bit word actually.
+		 */
 		if (BITS_PER_BITMAPWORD == 64
 			&& bitmapWordCount == 1
 			&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
@@ -328,7 +332,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	visiMapEntry->data->version = 1;
 
 	/*
-	 * bitmapDataSize required by Bitmap_Compress() is always in
+	 * blockCount required by Bitmap_Compress() is always in
 	 * uint32-words. So, if bitmapset uses 64 bit words, double
 	 * the value of bitmapWordCount.
 	 */

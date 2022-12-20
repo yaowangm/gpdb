@@ -201,6 +201,10 @@ Bitmap_Compress_Default(
 
 #ifdef WORDS_BIGENDIAN
 
+		/*
+		 * On a big-endian env, we need to compress the blocks in a interlaced
+		 * order, i.e.: 2,1,4,3,6,5,...
+		 */
 		for (int i = 0;i < blockCount; i += 2)
 		{
 			compBlockData.blockData = bitmap[i + 1];
@@ -279,7 +283,11 @@ Bitmap_Compress_Write_Header(BitmapCompressionType compressionType,
 /*
  * Compresses the given bitmap data.
  * 
- * bitmapDataSize in uint32-words.
+ * blockCount in uint32-words.
+ *
+ * Note: to keep consistency with (ondisk) bitstream in 32bit words, we need
+ * to generate 32bit bitstream even on 64bit env, i.e. generating bitstream
+ * in 32bit words by 64bit bitmapset.
  */ 
 int
 Bitmap_Compress(
@@ -291,6 +299,14 @@ Bitmap_Compress(
 		bool isOnly32bitOneWord)
 {
 	Bitstream bitstream;
+	/*
+	 * onDiskBlockCount is the block count of (ondisk) bitstream. In most cases
+	 * it is the same to blockCount (the block count of in-memory bms) because
+	 * both are in uint32 words. However, there is a special case:
+	 * On 64bit env, when there is only one 32bit word ondisk, blockCount should
+	 * be 2 since a 64bit word always has two 32bit word. We need to set
+	 * onDiskBlockCount = 1 for the case.
+	 */
 	int onDiskBlockCount = blockCount;
 
 	if (isOnly32bitOneWord)
@@ -298,6 +314,8 @@ Bitmap_Compress(
 		Assert(BITS_PER_BITMAPWORD == 64);
 		Assert(maxOutDataSize == sizeof(uint32) + 2);
 		Assert(blockCount == 2);
+
+		onDiskBlockCount = 1;
 	}
 	else
 	{
@@ -305,16 +323,6 @@ Bitmap_Compress(
 	}
 
 	memset(outData, 0, maxOutDataSize);
-
-	/*
-	 * On 64bit env, if there is only one 32bit word, blockCount should be 2
-	 * since a 64bit word always has two 32bit word. Set onDiskBlockCount = 1
-	 * to set the blockCount of bitstream (always in 32bit).
-	 */
-	if (isOnly32bitOneWord)
-	{
-		onDiskBlockCount = 1;
-	}
 
 	/* Header 
 	 */
