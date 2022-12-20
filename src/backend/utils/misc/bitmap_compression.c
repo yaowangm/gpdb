@@ -45,7 +45,7 @@ Bitmap_Compress_NoCompress(
 		Bitstream *bitstream);
 
 static void
-Bitmap_Compress_Decompress(BitmapDecompressState *state,
+Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 						   uint32 *bitmap);
 
 static void
@@ -133,7 +133,7 @@ BitmapDecompress_Decompress(BitmapDecompressState *state,
 	}
 	else if (state->compressionType == BITMAP_COMPRESSION_TYPE_DEFAULT)
 	{
-		Bitmap_Compress_Decompress(state, bitmap);
+		Bitmap_Compress_DefaultDecompress(state, bitmap);
 	}
 	else
 	{
@@ -172,7 +172,7 @@ Bitmap_EncodeRLE(Bitstream* bitstream,
 }
 
 static bool 
-Bitmap_Compress_Default(
+Bitmap_Compress_DefaultCompress(
 		uint32* bitmap,
 		int blockCount,
 		bool isOnly32bitOneWord,
@@ -203,7 +203,7 @@ Bitmap_Compress_Default(
 
 		/*
 		 * On a big-endian env, we need to compress the blocks in a interlaced
-		 * order, i.e.: 2,1,4,3,6,5,...
+		 * order, i.e.: 1,0,3,2,5,4,...
 		 */
 		for (int i = 0;i < blockCount; i += 2)
 		{
@@ -341,8 +341,10 @@ Bitmap_Compress(
 											  isOnly32bitOneWord,
 											  &bitstream);
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
-			if (!Bitmap_Compress_Default(bitmap, blockCount, isOnly32bitOneWord,
-						&bitstream))
+			if (!Bitmap_Compress_DefaultCompress(bitmap,
+												 blockCount,
+												 isOnly32bitOneWord,
+												 &bitstream))
 			{
 				/* This may happen when the input bitmap is not nicely compressible */
 				/* Fall back */
@@ -487,8 +489,8 @@ Bitmap_Compress_NoCompress(
 }
 
 static void
-Bitmap_Compress_Decompress(BitmapDecompressState *state,
-						   uint32 *bitmap)
+Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
+								  uint32 *bitmap)
 {
 	uint32 lastBlockData = 0;
 	uint32 rleRepeatCount = 0;
@@ -498,6 +500,13 @@ Bitmap_Compress_Decompress(BitmapDecompressState *state,
 
 	for (int i = 0; i < state->blockCount; i++)
 	{
+		/*
+		 * On a 64bit big-endian env, we need to save the uncompressed data
+		 * to in-memory bitmap in a interlaced order, i.e.:
+		 * 1,0,3,2,5,4,...
+		 * Othersize (32bit or small-endian 64bit env), just save them one
+		 * by one.
+		 */
 #ifdef WORDS_BIGENDIAN
 		if (BITS_PER_BITMAPWORD == 64)
 		{

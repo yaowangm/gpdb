@@ -129,7 +129,9 @@ AppendOnlyVisimap_GetAttrNotNull(HeapTuple t, TupleDesc td, int attr)
 void
 AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t dataSize)
 {
+	/* the block count of (ondisk) bitstream */
 	int			onDiskBlockCount = 0;
+	/* the word count of in-memory bitmapset */
 	int			bmsWordCount = 0;
 
 	Assert(visiMapEntry);
