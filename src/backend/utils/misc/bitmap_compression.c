@@ -457,6 +457,10 @@ Bitmap_CompressBlock(BitmapCompressBlockController *compBlockCtl)
 	return true;
 }
 
+/*
+ * Compress bitmap by BITMAP_COMPRESSION_TYPE_NO method
+ * (no actual compression, just copy data)
+ */
 static int
 Bitmap_Compress_NoCompress(
 		uint32*		bitmap,
@@ -512,26 +516,32 @@ Bitmap_Compress_NoCompress(
 
 	bitStreamLen = ((isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32)) + 2;
 	/*
+	 * TODO:
 	 * The assertion failed because we directly wrote the bit stream but did not
-	 * update the offset. Maybe we will fix it one day.
+	 * update the offset. Maybe we can refactor the code by a more telegant way
+	 * in future.
 	 */
 	/* Assert(bitStreamLen == Bitstream_GetLength(bitstream)); */
 
 	return bitStreamLen;
 }
 
+/*
+ * Decompress bitmap by BITMAP_COMPRESSION_TYPE_DEFAULT method
+ */
 static void
 Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 								  uint32 *bitmap)
 {
-	uint32 lastBlockData = 0;
-	uint32 rleRepeatCount = 0;
-	uint32 flag = 0;
-	bool failed = false;
-	uint32 *nextPos = 0;
+	uint32	lastBlockData = 0;
+	uint32	rleRepeatCount = 0;
+	uint32	flag = 0;
+	bool	failed = false;
+	uint32	*nextPos = 0;
 
 	for (int i = 0; i < state->blockCount; i++)
 	{
+#ifdef WORDS_BIGENDIAN
 		/*
 		 * On a 64bit big-endian env, we need to save the uncompressed data
 		 * to in-memory bitmap in a interlaced order, i.e.:
@@ -539,7 +549,6 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 		 * Othersize (32bit or small-endian 64bit env), just save them one
 		 * by one.
 		 */
-#ifdef WORDS_BIGENDIAN
 		if (BITS_PER_BITMAPWORD == 64)
 		{
 			if(i % 2 == 0)
@@ -613,6 +622,10 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 	}
 }
 
+/*
+ * Decompress bitmap by BITMAP_COMPRESSION_TYPE_NO method
+ * (no actual compression, just copy data)
+ */
 static void
 Bitmap_Compress_NoDecompress(BitmapDecompressState *state,
 							 uint32 *bitmap)
