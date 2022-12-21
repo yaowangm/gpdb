@@ -24,8 +24,8 @@ typedef enum BitmapCompressionFlag
 	BITMAP_COMPRESSION_FLAG_RAW = 0x03
 } BitmapCompressionFlag;
 
-/* Data structure to compress a particular bitmap block */
-typedef struct BitmapCompressBlockData
+/* Controller to compress a particular bitmap block */
+typedef struct BitmapCompressBlockController
 {
 	Bitstream	*bitstream;
 	uint32		blockData;
@@ -33,10 +33,10 @@ typedef struct BitmapCompressBlockData
 	uint32		lastBlockData;
 	int			lastBlockFlag;
 	int			rleRepeatCount;
-} BitmapCompressBlockData;
+} BitmapCompressBlockController;
 
 static bool
-Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData);
+Bitmap_CompressBlock(BitmapCompressBlockController *compBlockCtl);
 
 static int
 Bitmap_Compress_NoCompress(
@@ -183,16 +183,16 @@ Bitmap_Compress_DefaultCompress(
 		bool isOnly32bitOneWord,
 		Bitstream *bitstream)
 {
-	BitmapCompressBlockData compBlockData = {0};
-	compBlockData.bitstream = bitstream;
-	compBlockData.isFirstBlock = true;
+	BitmapCompressBlockController compBlockCtl = {0};
+	compBlockCtl.bitstream = bitstream;
+	compBlockCtl.isFirstBlock = true;
 
 	if (BITS_PER_BITMAPWORD == 32)
 	{
 		for (int i = 0; i < blockCount; i++)
 		{
-			compBlockData.blockData = bitmap[i];
-			if(!Bitmap_CompressBlock(&compBlockData))
+			compBlockCtl.blockData = bitmap[i];
+			if(!Bitmap_CompressBlock(&compBlockCtl))
 			{
 				return false;
 			}
@@ -212,8 +212,8 @@ Bitmap_Compress_DefaultCompress(
 		 */
 		for (int i = 0;i < blockCount; i += 2)
 		{
-			compBlockData.blockData = bitmap[i + 1];
-			if(!Bitmap_CompressBlock(&compBlockData))
+			compBlockCtl.blockData = bitmap[i + 1];
+			if(!Bitmap_CompressBlock(&compBlockCtl))
 			{
 				return false;
 			}
@@ -228,8 +228,8 @@ Bitmap_Compress_DefaultCompress(
 				break;
 			}
 
-			compBlockData.blockData = bitmap[i];
-			if(!Bitmap_CompressBlock(&compBlockData))
+			compBlockCtl.blockData = bitmap[i];
+			if(!Bitmap_CompressBlock(&compBlockCtl))
 			{
 				return false;
 			}
@@ -239,8 +239,8 @@ Bitmap_Compress_DefaultCompress(
 
 		for (int i = 0; i < blockCount; i++)
 		{
-			compBlockData.blockData = bitmap[i];
-			if(!Bitmap_CompressBlock(&compBlockData))
+			compBlockCtl.blockData = bitmap[i];
+			if(!Bitmap_CompressBlock(&compBlockCtl))
 			{
 				return false;
 			}
@@ -263,10 +263,10 @@ Bitmap_Compress_DefaultCompress(
 	}
 
 	/* Write last RLE block */
-	if (compBlockData.rleRepeatCount > 0)
+	if (compBlockCtl.rleRepeatCount > 0)
 	{
-		if (!Bitmap_EncodeRLE(bitstream, compBlockData.rleRepeatCount,
-					compBlockData.lastBlockFlag))
+		if (!Bitmap_EncodeRLE(bitstream, compBlockCtl.rleRepeatCount,
+					compBlockCtl.lastBlockFlag))
 			return false;
 	}
 	return true;
@@ -382,7 +382,7 @@ Bitmap_Compress(
 
 /* Compress a particular bitmap block */
 static bool
-Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
+Bitmap_CompressBlock(BitmapCompressBlockController *compBlockCtl)
 {
 	/*
 	 * When
@@ -391,68 +391,68 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 	 *  3. current block is not the first block
 	 * We just increase the repeat count.
 	 */
-	if (compBlockData->blockData == compBlockData->lastBlockData
-		&& compBlockData->rleRepeatCount <= 255
-		&& !compBlockData->isFirstBlock)
+	if (compBlockCtl->blockData == compBlockCtl->lastBlockData
+		&& compBlockCtl->rleRepeatCount <= 255
+		&& !compBlockCtl->isFirstBlock)
 	{
-		(compBlockData->rleRepeatCount)++;
+		(compBlockCtl->rleRepeatCount)++;
 	}
 	else
 	{
-		compBlockData->isFirstBlock = false;
+		compBlockCtl->isFirstBlock = false;
 		/* Write the repeat code */
-		if (compBlockData->rleRepeatCount > 0)
+		if (compBlockCtl->rleRepeatCount > 0)
 		{
-			if (!Bitmap_EncodeRLE(compBlockData->bitstream,
-								  compBlockData->rleRepeatCount,
-								  compBlockData->lastBlockFlag))
+			if (!Bitmap_EncodeRLE(compBlockCtl->bitstream,
+								  compBlockCtl->rleRepeatCount,
+								  compBlockCtl->lastBlockFlag))
 			{
 				return false;
 			}
-			compBlockData->rleRepeatCount = 0;
+			compBlockCtl->rleRepeatCount = 0;
 		}
 
 		/* Write the ZERO code */
-		if (compBlockData->blockData == 0)
+		if (compBlockCtl->blockData == 0)
 		{
-			if (!Bitstream_Put(compBlockData->bitstream,
+			if (!Bitstream_Put(compBlockCtl->bitstream,
 							   BITMAP_COMPRESSION_FLAG_ZERO,
 							   2))
 			{
 				return false;
 			}
-			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
+			compBlockCtl->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
 		}
 		/* Write the ONE code */
-		else if (compBlockData->blockData == 0xFFFFFFFFU)
+		else if (compBlockCtl->blockData == 0xFFFFFFFFU)
 		{
-			if (!Bitstream_Put(compBlockData->bitstream,
+			if (!Bitstream_Put(compBlockCtl->bitstream,
 							   BITMAP_COMPRESSION_FLAG_ONE,
 							   2))
 			{
 				return false;
 			}
-			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
+			compBlockCtl->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
 		}
 		/* Write the RAW code */
 		else
 		{
-			if (!Bitstream_Put(compBlockData->bitstream,
+			if (!Bitstream_Put(compBlockCtl->bitstream,
 							   BITMAP_COMPRESSION_FLAG_RAW,
 							   2))
 			{
 				return false;
 			}
-			if (!Bitstream_Put(compBlockData->bitstream,
-							   compBlockData->blockData,
+			if (!Bitstream_Put(compBlockCtl->bitstream,
+							   compBlockCtl->blockData,
 							   32))
 			{
 				return false;
 			}
-			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_RAW;
+			compBlockCtl->lastBlockFlag = BITMAP_COMPRESSION_FLAG_RAW;
 		}
 
-		compBlockData->lastBlockData = compBlockData->blockData;
+		compBlockCtl->lastBlockData = compBlockCtl->blockData;
 	}
 	return true;
 }
