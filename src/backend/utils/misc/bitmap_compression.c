@@ -384,6 +384,13 @@ Bitmap_Compress(
 static bool
 Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 {
+	/*
+	 * When
+	 *  1. current block equals to previous block
+	 *  2. repeat count <= 255
+	 *  3. current block is not the first block
+	 * We just increase the repeat count.
+	 */
 	if (compBlockData->blockData == compBlockData->lastBlockData
 		&& compBlockData->rleRepeatCount <= 255
 		&& !compBlockData->isFirstBlock)
@@ -393,6 +400,7 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 	else
 	{
 		compBlockData->isFirstBlock = false;
+		/* Write the repeat code */
 		if (compBlockData->rleRepeatCount > 0)
 		{
 			if (!Bitmap_EncodeRLE(compBlockData->bitstream,
@@ -404,6 +412,7 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 			compBlockData->rleRepeatCount = 0;
 		}
 
+		/* Write the ZERO code */
 		if (compBlockData->blockData == 0)
 		{
 			if (!Bitstream_Put(compBlockData->bitstream,
@@ -414,6 +423,7 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 			}
 			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
 		}
+		/* Write the ONE code */
 		else if (compBlockData->blockData == 0xFFFFFFFFU)
 		{
 			if (!Bitstream_Put(compBlockData->bitstream,
@@ -424,6 +434,7 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 			}
 			compBlockData->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
 		}
+		/* Write the RAW code */
 		else
 		{
 			if (!Bitstream_Put(compBlockData->bitstream,
@@ -448,10 +459,10 @@ Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 
 static int
 Bitmap_Compress_NoCompress(
-		uint32* bitmap,
-		int blockCount,
-		bool isOnly32bitOneWord,
-		Bitstream *bitstream)
+		uint32*		bitmap,
+		int			blockCount,
+		bool		isOnly32bitOneWord,
+		Bitstream	*bitstream)
 {
 	unsigned char *offset = 0;
 	int bitStreamLen = 0;
