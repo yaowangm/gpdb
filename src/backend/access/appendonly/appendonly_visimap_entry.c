@@ -297,6 +297,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	int	compressedBitmapSize = 0;
 	/* bitmap word count */
 	int	bitmapWordCount = 0;
+	/* Indicate if there is only one 32bit word, valid only for 64bit bms */
 	bool isOnly32bitOneWord = false;
 
 	Assert(visiMapEntry);

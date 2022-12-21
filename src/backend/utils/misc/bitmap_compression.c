@@ -313,9 +313,10 @@ Bitmap_Compress(
 	{
 		Assert(BITS_PER_BITMAPWORD == 64);
 		Assert(maxOutDataSize == sizeof(uint32) + 2);
-		Assert(blockCount == 2);
+		/* blockCount might be 0 */
+		Assert(blockCount == 2 || blockCount == 0);
 
-		onDiskBlockCount = 1;
+		onDiskBlockCount = (blockCount == 0) ? 0 : 1;
 	}
 	else
 	{
