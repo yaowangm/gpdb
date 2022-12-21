@@ -301,12 +301,12 @@ Bitmap_Compress_Write_Header(BitmapCompressionType compressionType,
  */ 
 int
 Bitmap_Compress(
-		BitmapCompressionType compressionType,
-		uint32* bitmap,
-		int blockCount,
-		unsigned char *outData,
-		int maxOutDataSize,
-		bool isOnly32bitOneWord)
+		BitmapCompressionType	compressionType,
+		uint32*					bitmap,
+		int						blockCount,
+		unsigned char			*outData,
+		int						maxOutDataSize,
+		bool					isOnly32bitOneWord)
 {
 	Bitstream bitstream;
 	/*

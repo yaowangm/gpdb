@@ -103,12 +103,12 @@ void BitmapDecompress_Decompress(
 		int bitmapDataSize);
 
 int Bitmap_Compress(
-		BitmapCompressionType compressionType,
-		uint32 *bitmapData,
-		int bitmapDataSize,
-		unsigned char *outData,
-		int maxOutDataSize,
-		bool isOnly32bitOneWord);
+		BitmapCompressionType	compressionType,
+		uint32				 	*bitmapData,
+		int						bitmapDataSize,
+		unsigned char			*outData,
+		int						maxOutDataSize,
+		bool					isOnly32bitOneWord);
 
 #endif
 
