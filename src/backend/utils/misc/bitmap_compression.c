@@ -24,14 +24,15 @@ typedef enum BitmapCompressionFlag
 	BITMAP_COMPRESSION_FLAG_RAW = 0x03
 } BitmapCompressionFlag;
 
+/* Data structure to compress a particular bitmap block */
 typedef struct BitmapCompressBlockData
 {
-	Bitstream *bitstream;
-	uint32 blockData;
-	bool isFirstBlock;
-	uint32 lastBlockData;
-	int lastBlockFlag;
-	int rleRepeatCount;
+	Bitstream	*bitstream;
+	uint32		blockData;
+	bool		isFirstBlock;
+	uint32		lastBlockData;
+	int			lastBlockFlag;
+	int			rleRepeatCount;
 } BitmapCompressBlockData;
 
 static bool
@@ -171,6 +172,10 @@ Bitmap_EncodeRLE(Bitstream* bitstream,
 	return true;
 }
 
+/*
+ * isOnly32bitOneWord indicate whether there is only one 32bit word,
+ * valid only for 64bit bms
+ */
 static bool 
 Bitmap_Compress_DefaultCompress(
 		uint32* bitmap,
@@ -241,7 +246,9 @@ Bitmap_Compress_DefaultCompress(
 			}
 
 			/*
-			 * If there is only one 32bit word, skip the latest word
+			 * A special case: on 64bit env we will have at least 2 32bit words
+			 * (one 64 bit word). If there is only one meaningful 32bit word
+			 * actually, the latest 32bit word is useless. Skip the latest word.
 			 */
 			if (isOnly32bitOneWord)
 			{
@@ -288,6 +295,9 @@ Bitmap_Compress_Write_Header(BitmapCompressionType compressionType,
  * Note: to keep consistency with (ondisk) bitstream in 32bit words, we need
  * to generate 32bit bitstream even on 64bit env, i.e. generating bitstream
  * in 32bit words by 64bit bitmapset.
+ * We also need to care a special case: when there is only one meaningful
+ * 32bit word, we will have 2 32bit words since a 64bit word has 2 32bit words.
+ * We need to skip the latest (empty) 32bit word when compressing it.
  */ 
 int
 Bitmap_Compress(
@@ -370,6 +380,7 @@ Bitmap_Compress(
 	}
 }
 
+/* Compress a particular bitmap block */
 static bool
 Bitmap_CompressBlock(BitmapCompressBlockData *compBlockData)
 {
@@ -461,6 +472,11 @@ Bitmap_Compress_NoCompress(
 	}
 	else
 	{
+		/*
+		 * On a big-endian machine, we need to copy the blocks in an interlaced
+		 * order: 1,0,3,2,5,4,...
+		 * otherwise, just copy the block as-is.
+		 */
 #ifdef WORDS_BIGENDIAN
 		for (int i = 0; i < blockCount; i += 2)
 		{
@@ -484,7 +500,11 @@ Bitmap_Compress_NoCompress(
 	}
 
 	bitStreamLen = ((isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32)) + 2;
-	//Assert(bitStreamLen == Bitstream_GetLength(bitstream));
+	/*
+	 * The assertion failed because we directly wrote the bit stream but did not
+	 * update the offset. Maybe we will fix it one day.
+	 */
+	/* Assert(bitStreamLen == Bitstream_GetLength(bitstream)); */
 
 	return bitStreamLen;
 }

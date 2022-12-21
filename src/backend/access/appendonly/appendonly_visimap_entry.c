@@ -550,8 +550,8 @@ AppendOnlyVisimapEntry_IsVisible(
 /*
  * The minimal size (in uint32's elements) the entry array needs to have to
  * cover the given offset
- * Note that on 64 bit env, AppendOnlyVisimapEntry->bitmap uses 64 bits, so
- * the caller of AppendOnlyVisimapEntry_GetMinimalSizeToCover() need to
+ * Note that on 64 bit env, AppendOnlyVisimapEntry->bitmap uses 64 bit word,
+ * so the caller of AppendOnlyVisimapEntry_GetMinimalSizeToCover() need to
  * half the returned value.
  */
 static uint32
