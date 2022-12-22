@@ -322,7 +322,7 @@ Bitmap_Compress(
 	if (isOnly32bitOneWord)
 	{
 		Assert(BITS_PER_BITMAPWORD == 64);
-		Assert(maxOutDataSize == sizeof(uint32) + 2);
+		Assert(maxOutDataSize >= sizeof(uint32) + 2);
 		/* blockCount might be 0 */
 		Assert(blockCount == 2 || blockCount == 0);
 
