@@ -204,39 +204,6 @@ Bitmap_Compress_DefaultCompress(
 		/* For 64bit bms blockCount must be 0 or even number */
 		Assert(blockCount % 2 == 0);
 
-#ifdef WORDS_BIGENDIAN
-
-		/*
-		 * On a big-endian env, we need to compress the blocks in a interlaced
-		 * order, i.e.: 1,0,3,2,5,4,...
-		 */
-		for (int i = 0;i < blockCount; i += 2)
-		{
-			compBlockCtl.blockData = bitmap[i + 1];
-			if(!Bitmap_CompressBlock(&compBlockCtl))
-			{
-				return false;
-			}
-
-			/*
-			 * If there is only one 32bit word, skip the latest word
-			 */
-			if (isOnly32bitOneWord)
-			{
-				Assert(blockCount == 2);
-				Assert(bitmap[0] == 0);
-				break;
-			}
-
-			compBlockCtl.blockData = bitmap[i];
-			if(!Bitmap_CompressBlock(&compBlockCtl))
-			{
-				return false;
-			}
-		}
-
-#else
-
 		for (int i = 0; i < blockCount; i++)
 		{
 			compBlockCtl.blockData = bitmap[i];
@@ -257,9 +224,6 @@ Bitmap_Compress_DefaultCompress(
 				break;
 			}
 		}
-
-#endif
-
 	}
 
 	/* Write last RLE block */
@@ -487,31 +451,9 @@ Bitmap_Compress_NoCompress(
 	}
 	else
 	{
-		/*
-		 * On a big-endian machine, we need to copy the blocks in an interlaced
-		 * order: 1,0,3,2,5,4,...
-		 * otherwise, just copy the block as-is.
-		 */
-#ifdef WORDS_BIGENDIAN
-		for (int i = 0; i < blockCount; i += 2)
-		{
-			memcpy(offset,
-				   bitmap[i + 1],
-				   sizeof(uint32));
-			offset += sizeof(uint32);
-
-			if (isOnly32bitOneWord)
-				break;
-			memcpy(offset,
-				   bitmap[i],
-				   sizeof(uint32));
-			offset += sizeof(uint32);
-		}
-#else
 		memcpy(offset,
 			   bitmap,
 			   (isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32));
-#endif
 	}
 
 	bitStreamLen = ((isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32)) + 2;
@@ -541,29 +483,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 
 	for (int i = 0; i < state->blockCount; i++)
 	{
-#ifdef WORDS_BIGENDIAN
-		/*
-		 * On a 64bit big-endian env, we need to save the uncompressed data
-		 * to in-memory bitmap in a interlaced order, i.e.:
-		 * 1,0,3,2,5,4,...
-		 * Othersize (32bit or small-endian 64bit env), just save them one
-		 * by one.
-		 */
-		if (BITS_PER_BITMAPWORD == 64)
-		{
-			if(i % 2 == 0)
-			{
-				nextPos = bitmap + i + 1;
-			}
-			else
-			{
-				nextPos = bitmap + i - 1;
-			}
-		}
-#else
 		nextPos = bitmap + i;
-#endif
-			
+
 		if (rleRepeatCount == 0)
 		{
 			if (!Bitstream_Get(&state->bitstream, 2, &flag))
@@ -630,36 +551,8 @@ static void
 Bitmap_Compress_NoDecompress(BitmapDecompressState *state,
 							 uint32 *bitmap)
 {
-	if (BITS_PER_BITMAPWORD == 32)
-	{
-		memcpy(bitmap, 
-			   Bitstream_GetAlignedData(&state->bitstream, 16), 
-			   state->blockCount * sizeof(uint32));
-	}
-	else
-	{
-#ifdef WORDS_BIGENDIAN
-		/*
-		 * If we are using 64bit bms and it is a big-endian system, read the
-		 * data from bit stream and copy them to bms in interlaced order, i.e.:
-		 * 0,1,3,2,5,4,...
-		 */
-		uint32 *offset = Bitstream_GetAlignedData(&state->bitstream, 16);
-		for (int i = 0; i < state->blockCount; i++)
-		{
-			bitmap[i + 1] = *(offset + 1);
-			/* If there is only one block, skip the rest. */
-			if (state->blockCount == 1)
-			{
-				break;
-			}
-			bitmap[i] = *(offset);
-			offset += 2;
-		}
-#else
-		memcpy(bitmap, 
-			   Bitstream_GetAlignedData(&state->bitstream, 16), 
-			   state->blockCount * sizeof(uint32));
-#endif
-	}
+	/* Work for both 64bit and 32bit word */
+	memcpy(bitmap, 
+		   Bitstream_GetAlignedData(&state->bitstream, 16), 
+		   state->blockCount * sizeof(uint32));
 }

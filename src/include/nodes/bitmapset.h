@@ -31,8 +31,12 @@ struct List;
  * Larger bitmap word sizes generally give better performance, so long as
  * they're not wider than the processor can handle efficiently.  We use
  * 64-bit words if pointers are that large, else 32-bit words.
+ *
+ * Disable 64-bit words for big-endian machine because we are lacking
+ * big-endian machine.
+ * TODO: enable 64-bit words for big-endian machine if possible... 
  */
-#if SIZEOF_VOID_P >= 8
+#if ((SIZEOF_VOID_P >= 8) && (!defined WORDS_BIGENDIAN))
 
 #define BITS_PER_BITMAPWORD 64
 typedef uint64 bitmapword;		/* must be an unsigned type */
