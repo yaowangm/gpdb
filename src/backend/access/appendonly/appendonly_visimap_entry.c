@@ -176,10 +176,8 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 		}
 		else
 		{
+			Assert(onDiskBlockCount % 2 == 0);
 			bmsWordCount = onDiskBlockCount / 2;
-			/* If onDiskBlockCount is odd, increase bmsWordCount */
-			if (onDiskBlockCount % 2 == 1)
-				bmsWordCount++;
 		}
 	}
 	else
