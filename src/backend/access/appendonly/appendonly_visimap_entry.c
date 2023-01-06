@@ -161,10 +161,12 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	visiMapEntry->bitmap = NULL;
 	onDiskBlockCount =
 		BitmapDecompress_GetBlockCount(&decompressState);
-	/*
-	 * Bitmap compression always uses 32 bit words, and the result of
-	 * BitmapDecompress_GetBlockCount() is always in 32 bit words. So,
-	 * if bitmapset uses 64 bit words, we can use half of the value.
+	/* The on-disk bitmap representation always uses 32-bit block size
+	 * (for backward compatibility). Depending on the environment, we
+	 * may be using either * 64-bit words or 32-bit words for the
+	 * in-memory representation.
+	 * So, if (in-memory) bitmapset uses 64 bit words, we can use half
+	 * of the on-disk bitmap block count.
 	 */
 	if (BITS_PER_BITMAPWORD == 64)
 	{
@@ -174,8 +176,10 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 		}
 		else
 		{
-			Assert(onDiskBlockCount % 2 == 0);
 			bmsWordCount = onDiskBlockCount / 2;
+			/* If onDiskBlockCount is odd, increase bmsWordCount */
+			if (onDiskBlockCount % 2 == 1)
+				bmsWordCount++;
 		}
 	}
 	else
@@ -184,7 +188,7 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 		bmsWordCount = onDiskBlockCount;
 	}
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
-	Assert(bmsWordCount > 0);
+	Assert(bmsWordCount >= 0);
 
 	if (onDiskBlockCount > 0)
 	{
@@ -295,7 +299,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	/* bitmap size, in bytes */
 	int	bitmapSize = 0;
 	int	compressedBitmapSize = 0;
-	/* bitmapset word count, might be in 64bit or 32bit */
+	/* word count in 64bit or 32bit words for in-memory bms */
 	int	bmsWordCount = 0;
 	/* Indicate if there is only one 32bit word, valid only for 64bit bms */
 	bool isOnly32bitOneWord = false;

@@ -50,8 +50,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 						   uint32 *bitmap);
 
 static void
-Bitmap_Compress_NoDecompress(BitmapDecompressState *state,
-							 uint32 *bitmap);
+Bitmap_Compress_MemcopyDecompress(BitmapDecompressState *state,
+								  uint32 *bitmap);
 
 /*
  * Initializes a new decompression run
@@ -109,9 +109,15 @@ BitmapDecompress_HasError(
 }
 
 /*
- * Performs the bitmap decompression.
+ * Perform bitmap decompression into in-memory buffer
  *
- * bitmapDataSize in uint32-words.
+ * bitmap: caller-allocated buffer that can hold state->blockCount
+ * number of 32-bit on-disk bitmap words.
+ *
+ * For both 32-bit and 64-bit in-memory bitmap word sizes, we write
+ * 32-bit words into the in-memory buffer contiguously. This is safe
+ * to do as we interpret two contiguous 32-bit words as one 64-bit
+ * word.
  */
 void
 BitmapDecompress_Decompress(BitmapDecompressState *state,
@@ -130,7 +136,7 @@ BitmapDecompress_Decompress(BitmapDecompressState *state,
 
 	if (state->compressionType == BITMAP_COMPRESSION_TYPE_NO)
 	{
-		Bitmap_Compress_NoDecompress(state, bitmap);
+		Bitmap_Compress_MemcopyDecompress(state, bitmap);
 	}
 	else if (state->compressionType == BITMAP_COMPRESSION_TYPE_DEFAULT)
 	{
@@ -548,8 +554,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
  * (no actual compression, just copy data)
  */
 static void
-Bitmap_Compress_NoDecompress(BitmapDecompressState *state,
-							 uint32 *bitmap)
+Bitmap_Compress_MemcopyDecompress(BitmapDecompressState *state,
+								  uint32 *bitmap)
 {
 	/* Work for both 64bit and 32bit word */
 	memcpy(bitmap, 
