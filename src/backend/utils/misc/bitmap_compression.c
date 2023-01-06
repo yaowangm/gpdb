@@ -50,8 +50,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 						   uint32 *bitmap);
 
 static void
-Bitmap_Compress_MemcopyDecompress(BitmapDecompressState *state,
-								  uint32 *bitmap);
+Bitmap_Compress_PlainDecompress(BitmapDecompressState *state,
+								uint32 *bitmap);
 
 /*
  * Initializes a new decompression run
@@ -136,7 +136,7 @@ BitmapDecompress_Decompress(BitmapDecompressState *state,
 
 	if (state->compressionType == BITMAP_COMPRESSION_TYPE_NO)
 	{
-		Bitmap_Compress_MemcopyDecompress(state, bitmap);
+		Bitmap_Compress_PlainDecompress(state, bitmap);
 	}
 	else if (state->compressionType == BITMAP_COMPRESSION_TYPE_DEFAULT)
 	{
@@ -554,8 +554,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
  * (no actual compression, just copy data)
  */
 static void
-Bitmap_Compress_MemcopyDecompress(BitmapDecompressState *state,
-								  uint32 *bitmap)
+Bitmap_Compress_PlainDecompress(BitmapDecompressState *state,
+								uint32 *bitmap)
 {
 	/* Work for both 64bit and 32bit word */
 	memcpy(bitmap, 
