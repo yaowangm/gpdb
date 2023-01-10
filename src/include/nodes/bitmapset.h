@@ -34,7 +34,10 @@ struct List;
  *
  * Disable 64-bit words for big-endian machine because we are lacking
  * big-endian machine.
- * TODO: enable 64-bit words for big-endian machine if possible... 
+ *
+ * TODO: enable 64-bit words for big-endian machine if possible
+ * We do have an implemention unverified and a lot of discussions.
+ * See: https://github.com/greenplum-db/gpdb/pull/14529
  */
 #if ((SIZEOF_VOID_P >= 8) && (!defined WORDS_BIGENDIAN))
 
