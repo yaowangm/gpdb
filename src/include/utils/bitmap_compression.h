@@ -108,7 +108,7 @@ int Bitmap_Compress(
 		int						bitmapDataSize,
 		unsigned char			*outData,
 		int						maxOutDataSize,
-		bool					isOnly32bitOneWord);
+		bool					single32bitWord);
 
 #endif
 

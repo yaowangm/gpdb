@@ -42,7 +42,7 @@ static int
 Bitmap_Compress_NoCompress(
 		uint32* bitmap,
 		int blockCount,
-		bool isOnly32bitOneWord,
+		bool single32bitWord,
 		Bitstream *bitstream);
 
 static void
@@ -50,8 +50,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
 						   uint32 *bitmap);
 
 static void
-Bitmap_Compress_PlainDecompress(BitmapDecompressState *state,
-								uint32 *bitmap);
+Bitmap_Compress_DecompressNone(BitmapDecompressState *state,
+							   uint32 *bitmap);
 
 /*
  * Initializes a new decompression run
@@ -136,7 +136,7 @@ BitmapDecompress_Decompress(BitmapDecompressState *state,
 
 	if (state->compressionType == BITMAP_COMPRESSION_TYPE_NO)
 	{
-		Bitmap_Compress_PlainDecompress(state, bitmap);
+		Bitmap_Compress_DecompressNone(state, bitmap);
 	}
 	else if (state->compressionType == BITMAP_COMPRESSION_TYPE_DEFAULT)
 	{
@@ -179,14 +179,14 @@ Bitmap_EncodeRLE(Bitstream* bitstream,
 }
 
 /*
- * isOnly32bitOneWord indicate whether there is only one 32bit word,
+ * single32bitWord indicate whether there is only one 32bit word,
  * valid only for 64bit bms
  */
 static bool 
 Bitmap_Compress_DefaultCompress(
 		uint32* bitmap,
 		int blockCount,
-		bool isOnly32bitOneWord,
+		bool single32bitWord,
 		Bitstream *bitstream)
 {
 	BitmapCompressBlockController compBlockCtl = {0};
@@ -223,7 +223,7 @@ Bitmap_Compress_DefaultCompress(
 			 * (one 64 bit word). If there is only one meaningful 32bit word
 			 * actually, the latest 32bit word is useless. Skip the latest word.
 			 */
-			if (isOnly32bitOneWord)
+			if (single32bitWord)
 			{
 				Assert(blockCount == 2);
 				Assert(bitmap[1] == 0);
@@ -276,7 +276,7 @@ Bitmap_Compress(
 		int						blockCount,
 		unsigned char			*outData,
 		int						maxOutDataSize,
-		bool					isOnly32bitOneWord)
+		bool					single32bitWord)
 {
 	Bitstream bitstream;
 	/*
@@ -289,7 +289,7 @@ Bitmap_Compress(
 	 */
 	int onDiskBlockCount = blockCount;
 
-	if (isOnly32bitOneWord)
+	if (single32bitWord)
 	{
 		Assert(BITS_PER_BITMAPWORD == 64);
 		Assert(maxOutDataSize >= sizeof(uint32) + 2);
@@ -319,12 +319,12 @@ Bitmap_Compress(
 		case BITMAP_COMPRESSION_TYPE_NO:
 			return Bitmap_Compress_NoCompress(bitmap,
 											  blockCount,
-											  isOnly32bitOneWord,
+											  single32bitWord,
 											  &bitstream);
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
 			if (!Bitmap_Compress_DefaultCompress(bitmap,
 												 blockCount,
-												 isOnly32bitOneWord,
+												 single32bitWord,
 												 &bitstream))
 			{
 				/* This may happen when the input bitmap is not nicely compressible */
@@ -337,7 +337,7 @@ Bitmap_Compress(
 						blockCount,
 						outData,
 						maxOutDataSize,
-						isOnly32bitOneWord);
+						single32bitWord);
 			}
 			else
 			{
@@ -435,13 +435,12 @@ static int
 Bitmap_Compress_NoCompress(
 		uint32*		bitmap,
 		int			blockCount,
-		bool		isOnly32bitOneWord,
+		bool		single32bitWord,
 		Bitstream	*bitstream)
 {
-	unsigned char *offset = 0;
-	int bitStreamLen = 0;
+	unsigned char *offset;
+	int bitStreamLen;
 
-	// By assertion I know that I have sufficient space for this
 	if (blockCount == 0)
 	{
 		/* we only have the header */
@@ -459,10 +458,10 @@ Bitmap_Compress_NoCompress(
 	{
 		memcpy(offset,
 			   bitmap,
-			   (isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32));
+			   (single32bitWord ? 1 : blockCount) * sizeof(uint32));
 	}
 
-	bitStreamLen = ((isOnly32bitOneWord ? 1 : blockCount) * sizeof(uint32)) + 2;
+	bitStreamLen = ((single32bitWord ? 1 : blockCount) * sizeof(uint32)) + 2;
 	/*
 	 * TODO:
 	 * The assertion failed because we directly wrote the bit stream but did not
@@ -554,8 +553,8 @@ Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
  * (no actual compression, just copy data)
  */
 static void
-Bitmap_Compress_PlainDecompress(BitmapDecompressState *state,
-								uint32 *bitmap)
+Bitmap_Compress_DecompressNone(BitmapDecompressState *state,
+							   uint32 *bitmap)
 {
 	/* Work for both 64bit and 32bit word */
 	memcpy(bitmap, 

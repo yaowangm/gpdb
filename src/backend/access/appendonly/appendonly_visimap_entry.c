@@ -170,6 +170,10 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 */
 	if (BITS_PER_BITMAPWORD == 64)
 	{
+		/*
+		 * Number of on-disk blocks is always 0, 1 or even.
+		 * See resizing logic in AppendOnlyVisimapEntry_HideTuple()
+		 */
 		if (onDiskBlockCount == 1)
 		{
 			bmsWordCount = 1;
@@ -295,12 +299,12 @@ void
 AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 {
 	/* bitmap size, in bytes */
-	int	bitmapSize = 0;
-	int	compressedBitmapSize = 0;
+	int	bitmapSize;
+	int	compressedBitmapSize;
 	/* word count in 64bit or 32bit words for in-memory bms */
-	int	bmsWordCount = 0;
+	int	bmsWordCount;
 	/* Indicate if there is only one 32bit word, valid only for 64bit bms */
-	bool isOnly32bitOneWord = false;
+	bool single32bitWord = false;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
@@ -317,7 +321,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 			&& bmsWordCount == 1
 			&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
 		{
-			isOnly32bitOneWord = true;
+			single32bitWord = true;
 			bitmapSize = sizeof(uint32);
 		}
 		else
@@ -329,9 +333,14 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	Assert(visiMapEntry->data);
+	Assert(APPENDONLY_VISIMAP_DATA_BUFFER_SIZE >= bitmapSize);
+	/*
+	 * On production environment without assertion, we need to terminate
+	 * current backend if we hit the error.
+	 */
 	if (bitmapSize > APPENDONLY_VISIMAP_DATA_BUFFER_SIZE)
 	{
-		elog(PANIC,
+		elog(FATAL,
 			 "incorrect bitmapSize: "
 			 "APPENDONLY_VISIMAP_DATA_BUFFER_SIZE = %lu, "
 			 "bitmapSize = %d, "
@@ -353,7 +362,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 											bmsWordCount * 2 : bmsWordCount,
 										   visiMapEntry->data->data,
 										   bitmapSize,
-										   isOnly32bitOneWord);
+										   single32bitWord);
 	Assert(compressedBitmapSize >= BITMAP_COMPRESSION_HEADER_SIZE);
 	SET_VARSIZE(visiMapEntry->data,
 				offsetof(AppendOnlyVisimapData, data) + compressedBitmapSize);
@@ -573,9 +582,15 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	minSize |= minSize >> 8;
 	minSize |= minSize >> 16;
 	minSize++;
+
+	Assert(minSize <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	/*
+	 * On production environment without assertion, we need to terminate
+	 * current backend if we hit the error.
+	 */
 	if (minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT)
 	{
-		elog(PANIC,
+		elog(FATAL,
 			 "incorrect minSize: offset=%ld, minSize=%u",
 			 offset,
 			 minSize);
