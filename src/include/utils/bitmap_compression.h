@@ -105,7 +105,7 @@ void BitmapDecompress_Decompress(
 int Bitmap_Compress(
 		BitmapCompressionType	compressionType,
 		uint32				 	*bitmapData,
-		int						bitmapDataSize,
+		int						blockCount,
 		unsigned char			*outData,
 		int						maxOutDataSize);
 
