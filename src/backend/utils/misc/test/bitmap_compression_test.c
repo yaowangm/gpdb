@@ -293,7 +293,7 @@ test__BitmapCompression__IllegalCompressionType(void **state)
 		Bitmap_Compress(
 		14, 
 		bitmap, blockCount,
-		output, sizeof(uint32) + 2);
+		output, sizeof(uint32) * 5);
 		assert_true(false); /*should not be reached */
 	}
 	PG_CATCH();
