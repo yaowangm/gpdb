@@ -42,7 +42,6 @@ static int
 Bitmap_Compress_NoCompress(
 		uint32* bitmap,
 		int blockCount,
-		bool single32bitWord,
 		Bitstream *bitstream);
 
 static void
@@ -178,57 +177,22 @@ Bitmap_EncodeRLE(Bitstream* bitstream,
 	return true;
 }
 
-/*
- * single32bitWord indicate whether there is only one 32bit word,
- * valid only for 64bit bms
- */
 static bool 
 Bitmap_Compress_DefaultCompress(
 		uint32* bitmap,
 		int blockCount,
-		bool single32bitWord,
 		Bitstream *bitstream)
 {
 	BitmapCompressBlockController compBlockCtl = {0};
 	compBlockCtl.bitstream = bitstream;
 	compBlockCtl.isFirstBlock = true;
 
-	if (BITS_PER_BITMAPWORD == 32)
+	for (int i = 0; i < blockCount; i++)
 	{
-		for (int i = 0; i < blockCount; i++)
+		compBlockCtl.blockData = bitmap[i];
+		if(!Bitmap_CompressBlock(&compBlockCtl))
 		{
-			compBlockCtl.blockData = bitmap[i];
-			if(!Bitmap_CompressBlock(&compBlockCtl))
-			{
-				return false;
-			}
-		}
-	}
-	else
-	{
-		Assert(BITS_PER_BITMAPWORD == 64);
-		/* For 64bit bms blockCount must be 0 or even number */
-		Assert(blockCount % 2 == 0);
-
-		for (int i = 0; i < blockCount; i++)
-		{
-			compBlockCtl.blockData = bitmap[i];
-			if(!Bitmap_CompressBlock(&compBlockCtl))
-			{
-				return false;
-			}
-
-			/*
-			 * A special case: on 64bit env we will have at least 2 32bit words
-			 * (one 64 bit word). If there is only one meaningful 32bit word
-			 * actually, the latest 32bit word is useless. Skip the latest word.
-			 */
-			if (single32bitWord)
-			{
-				Assert(blockCount == 2);
-				Assert(bitmap[1] == 0);
-				break;
-			}
+			return false;
 		}
 	}
 
@@ -240,7 +204,6 @@ Bitmap_Compress_DefaultCompress(
 			return false;
 	}
 	return true;
-
 }
 
 static bool
@@ -262,55 +225,25 @@ Bitmap_Compress_Write_Header(BitmapCompressionType compressionType,
  * 
  * blockCount in uint32-words.
  *
- * Note: to keep consistency with (ondisk) bitstream in 32bit words, we need
- * to generate 32bit bitstream even on 64bit env, i.e. generating bitstream
- * in 32bit words by 64bit bitmapset.
- * We also need to care a special case: when there is only one meaningful
- * 32bit word, we will have 2 32bit words since a 64bit word has 2 32bit words.
- * We need to skip the latest (empty) 32bit word when compressing it.
  */ 
 int
 Bitmap_Compress(
 		BitmapCompressionType	compressionType,
-		uint32*					bitmap,
+		uint32					*bitmap,
 		int						blockCount,
 		unsigned char			*outData,
-		int						maxOutDataSize,
-		bool					single32bitWord)
+		int						maxOutDataSize)
 {
 	Bitstream bitstream;
-	/*
-	 * onDiskBlockCount is the block count of (ondisk) bitstream. In most cases
-	 * it is the same to blockCount (the block count of in-memory bms) because
-	 * both are in uint32 words. However, there is a special case:
-	 * On 64bit env, when there is only one 32bit word ondisk, blockCount should
-	 * be 2 since a 64bit word always has two 32bit word. We need to explictly
-	 * set onDiskBlockCount = 1 for the case.
-	 */
-	int onDiskBlockCount = blockCount;
 
-	if (single32bitWord)
-	{
-		Assert(BITS_PER_BITMAPWORD == 64);
-		Assert(maxOutDataSize >= sizeof(uint32) + 2);
-		/* blockCount might be 0 */
-		Assert(blockCount == 2 || blockCount == 0);
-
-		onDiskBlockCount = (blockCount == 0) ? 0 : 1;
-	}
-	else
-	{
-		Assert(maxOutDataSize >= (blockCount * sizeof(uint32) + 2));
-	}
+	Assert(maxOutDataSize >= (blockCount * sizeof(uint32) + 2));
 
 	memset(outData, 0, maxOutDataSize);
 
 	/* Header 
 	 */
 	Bitstream_Init(&bitstream, outData, maxOutDataSize);
-	if (!Bitmap_Compress_Write_Header(compressionType,
-									  onDiskBlockCount,
-									  &bitstream))
+	if (!Bitmap_Compress_Write_Header(compressionType,blockCount, &bitstream))
 		elog(ERROR, "Failed to write bitmap compression header");
 
 	/* bitmap content */
@@ -319,25 +252,20 @@ Bitmap_Compress(
 		case BITMAP_COMPRESSION_TYPE_NO:
 			return Bitmap_Compress_NoCompress(bitmap,
 											  blockCount,
-											  single32bitWord,
 											  &bitstream);
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
-			if (!Bitmap_Compress_DefaultCompress(bitmap,
-												 blockCount,
-												 single32bitWord,
-												 &bitstream))
+			if (!Bitmap_Compress_DefaultCompress(bitmap, blockCount,
+						&bitstream))
 			{
 				/* This may happen when the input bitmap is not nicely compressible */
 				/* Fall back */
-
 				memset(outData, 0, maxOutDataSize);
 				return Bitmap_Compress(
 						BITMAP_COMPRESSION_TYPE_NO,
 						bitmap,
 						blockCount,
 						outData,
-						maxOutDataSize,
-						single32bitWord);
+						maxOutDataSize);
 			}
 			else
 			{
@@ -435,7 +363,6 @@ static int
 Bitmap_Compress_NoCompress(
 		uint32*		bitmap,
 		int			blockCount,
-		bool		single32bitWord,
 		Bitstream	*bitstream)
 {
 	unsigned char *offset;
@@ -448,20 +375,11 @@ Bitmap_Compress_NoCompress(
 	}
 
 	offset = Bitstream_GetAlignedData(bitstream, 16);
-	if (BITS_PER_BITMAPWORD == 32)
-	{
-		memcpy(offset,
-			   bitmap,
-			   blockCount * sizeof(uint32));
-	}
-	else
-	{
-		memcpy(offset,
-			   bitmap,
-			   (single32bitWord ? 1 : blockCount) * sizeof(uint32));
-	}
+	memcpy(offset,
+		   bitmap,
+		   blockCount * sizeof(uint32));
 
-	bitStreamLen = ((single32bitWord ? 1 : blockCount) * sizeof(uint32)) + 2;
+	bitStreamLen = (blockCount * sizeof(uint32)) + 2;
 	/*
 	 * TODO:
 	 * The assertion failed because we directly wrote the bit stream but did not

@@ -302,9 +302,9 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	int	bitmapSize;
 	int	compressedBitmapSize;
 	/* word count in 64bit or 32bit words for in-memory bms */
-	int	bmsWordCount;
-	/* Indicate if there is only one 32bit word, valid only for 64bit bms */
-	bool single32bitWord = false;
+	int	bmsWordCount = 0;
+	/* block count always in 32bit (after conversion if necessary) */
+	int	blockCount = 0;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
@@ -313,22 +313,44 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	if (visiMapEntry->bitmap)
 	{
 		bmsWordCount = visiMapEntry->bitmap->nwords;
+
 		/*
-		 * On 64bit env, if there is only one word in bms, and the last half
-		 * of the word is empty, it means there is only one 32bit word actually.
+		 * On 64bit env, there is a conflict: in-memory bms is in 64bit word,
+		 * but on-disk block is in 32bit word to keep consistency. We need to
+		 * provide 32bit block count to Bitmap_Compress() after kind of
+		 * conversion.
 		 */
-		if (BITS_PER_BITMAPWORD == 64
-			&& bmsWordCount == 1
-			&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
+		if (BITS_PER_BITMAPWORD == 64)
 		{
-			single32bitWord = true;
-			bitmapSize = sizeof(uint32);
+			/*
+			 * On 64bit env, if there is only one word in bms, and the last half
+			 * of the word is empty, it means there is only one 32bit word
+			 * actually.
+			 */
+			if (bmsWordCount == 1
+				&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
+			{
+				blockCount = 1;
+			}
+			else
+			{
+				/*
+				 * blockCount required by Bitmap_Compress() is always in
+				 * uint32-words. So, if bitmapset uses 64 bit words, double
+				 * the value of bmsWordCount.
+				 */
+				blockCount = visiMapEntry->bitmap->nwords * 2;
+			}
 		}
 		else
 		{
-			bitmapSize = visiMapEntry->bitmap->nwords * sizeof(bitmapword);
+			/*
+			 * On 32bit env, blockCount is always equal to bmsWordCount.
+			 */
+			blockCount = visiMapEntry->bitmap->nwords;
 		}
 	}
+	bitmapSize = sizeof(uint32) * blockCount;
 	bitmapSize += BITMAP_COMPRESSION_HEADER_SIZE;
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
@@ -351,18 +373,11 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	}
 	visiMapEntry->data->version = 1;
 
-	/*
-	 * blockCount required by Bitmap_Compress() is always in
-	 * uint32-words. So, if bitmapset uses 64 bit words, double
-	 * the value of bmsWordCount.
-	 */
 	compressedBitmapSize = Bitmap_Compress(BITMAP_COMPRESSION_TYPE_DEFAULT,
 										   (visiMapEntry->bitmap ? (uint32*)visiMapEntry->bitmap->words : NULL),
-										   BITS_PER_BITMAPWORD == 64 ?
-											bmsWordCount * 2 : bmsWordCount,
+										   blockCount,
 										   visiMapEntry->data->data,
-										   bitmapSize,
-										   single32bitWord);
+										   bitmapSize);
 	Assert(compressedBitmapSize >= BITMAP_COMPRESSION_HEADER_SIZE);
 	SET_VARSIZE(visiMapEntry->data,
 				offsetof(AppendOnlyVisimapData, data) + compressedBitmapSize);

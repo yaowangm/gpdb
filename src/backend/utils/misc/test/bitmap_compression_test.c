@@ -20,7 +20,7 @@ test__BitmapCompression__ZeroBitmap(void **state)
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
 		bitmap, 4,
-		output, 20, false);
+		output, 20);
 	assert_true(r < sizeof(uint32) * 4 && r >= 0);
 	uint32 bitmap2[4];
 	memset(bitmap2, 1, sizeof(uint32) * 4);
@@ -54,7 +54,7 @@ test__BitmapCompression__Raw(void **state)
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
 		bitmap, blockCount,
-		output, sizeof(uint32) * 5, false);
+		output, sizeof(uint32) * 5);
 	assert_true(r < sizeof(uint32) * blockCount && r >= 0);
 	uint32 bitmap2[4];
 	memset(bitmap2, 1, sizeof(uint32) * blockCount);
@@ -88,7 +88,7 @@ test__BitmapCompression__ExplicitNoCompression(void **state)
 	int r = Bitmap_Compress(
 			BITMAP_COMPRESSION_TYPE_NO, 
 		bitmap, blockCount,
-		output, sizeof(uint32) * 5, false);
+		output, sizeof(uint32) * 5);
 	assert_int_equal(r, (sizeof(uint32) * 4) + 2);
 
 	uint32 bitmap2[4];
@@ -113,17 +113,17 @@ test__BitmapCompression__ExplicitNoCompressionNoBlocks(void **state)
 	uint32 bitmap[1];
 	memset(bitmap, 0, sizeof(uint32) * 1);
 
-	unsigned char output[sizeof(uint32) + 2];
-	memset(output, 0, sizeof(uint32) + 2);
+	unsigned char output[sizeof(uint32) * 5];
+	memset(output, 0, sizeof(uint32) * 5);
 
 	int r = Bitmap_Compress(
 			BITMAP_COMPRESSION_TYPE_NO, 
 		bitmap, blockCount,
-		output, sizeof(uint32) + 2, BITS_PER_BITMAPWORD == 64);
+		output, sizeof(uint32) * 5);
 	assert_int_equal(r, 2);
 
 	uint32 bitmap2[1];
-	memset(bitmap2, 1, sizeof(uint32));
+	memset(bitmap2, 1, sizeof(uint32) * 1);
 
 	BitmapDecompressState decomp_state;
 	BitmapDecompress_Init(&decomp_state, output, r);
@@ -153,7 +153,7 @@ test__BitmapCompression__ImplicitNoCompression(void **state)
 	int r = Bitmap_Compress(
 			BITMAP_COMPRESSION_TYPE_DEFAULT, 
 		bitmap, blockCount,
-		output, 18, false);
+		output, 18);
 	assert_int_equal(r, (sizeof(uint32) * 4) + 2);
 
 	uint32 bitmap2[4];
@@ -199,7 +199,7 @@ test__BitmapCompression__MultipleTypeBitmap(void **state)
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
 		bitmap, 16,
-		output, sizeof(uint32) * 17, false);
+		output, sizeof(uint32) * 17);
 	assert_true(r < sizeof(uint32) * 16 && r >= 0);
 	uint32 bitmap2[16];
 	memset(bitmap2, 1, sizeof(uint32) * 16);
@@ -244,7 +244,7 @@ test__BitmapCompression_ShortDecompress(void **state)
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
 		bitmap, 16,
-		output, sizeof(uint32) * 17, false);
+		output, sizeof(uint32) * 17);
 	assert_true(r < sizeof(uint32) * 16 && r >= 0);
 	uint32 bitmap2[16];
 	memset(bitmap2, 1, sizeof(uint32) * 16);
@@ -285,15 +285,15 @@ test__BitmapCompression__IllegalCompressionType(void **state)
 	uint32 bitmap[1];
 	memset(bitmap, 0, sizeof(uint32) * 1);
 
-	unsigned char output[sizeof(uint32) + 2];
-	memset(output, 0, sizeof(uint32) + 2);
+	unsigned char output[sizeof(uint32) * 5];
+	memset(output, 0, sizeof(uint32) * 5);
 
 	PG_TRY();
 	{
 		Bitmap_Compress(
 		14, 
 		bitmap, blockCount,
-		output, sizeof(uint32) + 2, BITS_PER_BITMAPWORD == 64);
+		output, sizeof(uint32) + 2);
 		assert_true(false); /*should not be reached */
 	}
 	PG_CATCH();
