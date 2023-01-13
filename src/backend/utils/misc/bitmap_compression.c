@@ -24,6 +24,26 @@ typedef enum BitmapCompressionFlag
 	BITMAP_COMPRESSION_FLAG_RAW = 0x03
 } BitmapCompressionFlag;
 
+/* Controller to compress a particular bitmap block */
+typedef struct BitmapCompressBlockController
+{
+	Bitstream	*bitstream;
+	uint32		blockData;
+	bool		isFirstBlock;
+	uint32		lastBlockData;
+	int			lastBlockFlag;
+	int			rleRepeatCount;
+} BitmapCompressBlockController;
+
+static bool
+Bitmap_CompressBlock(BitmapCompressBlockController *compBlockCtl);
+
+static int
+Bitmap_Compress_NoCompress(
+		uint32* bitmap,
+		int blockCount,
+		Bitstream *bitstream);
+
 /*
  * Initializes a new decompression run
  */ 
@@ -211,70 +231,32 @@ Bitmap_EncodeRLE(Bitstream* bitstream,
 }
 
 static bool 
-Bitmap_Compress_Default(
+Bitmap_Compress_DefaultCompress(
 		uint32* bitmap,
 		int blockCount,
 		Bitstream *bitstream)
 {
-	uint32 lastBlockData;
-	int lastBlockFlag;
-	int rleRepeatCount;
-	int i;
+	BitmapCompressBlockController compBlockCtl = {0};
+	compBlockCtl.bitstream = bitstream;
+	compBlockCtl.isFirstBlock = true;
 
-	lastBlockData = 0;
-	lastBlockFlag = 0;
-	rleRepeatCount = 0;
-	for (i = 0; i < blockCount; i++)
+	for (int i = 0; i < blockCount; i++)
 	{
-		uint32 blockData = bitmap[i];
-		if (blockData == lastBlockData && rleRepeatCount <= 255 && i > 0)
+		compBlockCtl.blockData = bitmap[i];
+		if(!Bitmap_CompressBlock(&compBlockCtl))
 		{
-			rleRepeatCount++;
-		}
-		else
-		{
-			if (rleRepeatCount > 0)
-			{
-				if (!Bitmap_EncodeRLE(bitstream, rleRepeatCount,
-						lastBlockFlag))
-					return false;
-				rleRepeatCount = 0;
-			}
-
-			if (blockData == 0)
-			{
-				if (!Bitstream_Put(bitstream, BITMAP_COMPRESSION_FLAG_ZERO, 2))
-					return false;
-				lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
-			}
-			else if (blockData == 0xFFFFFFFFU)
-			{
-				if (!Bitstream_Put(bitstream, BITMAP_COMPRESSION_FLAG_ONE, 2))
-					return false;
-				lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
-			}
-			else
-			{
-				if (!Bitstream_Put(bitstream, BITMAP_COMPRESSION_FLAG_RAW, 2))
-					return false;
-				if (!Bitstream_Put(bitstream, blockData, 32))
-					return false;
-				lastBlockFlag = BITMAP_COMPRESSION_FLAG_RAW;
-			}
-
-			lastBlockData = blockData;
+			return false;
 		}
 	}
 
 	/* Write last RLE block */
-	if (rleRepeatCount > 0)
+	if (compBlockCtl.rleRepeatCount > 0)
 	{
-		if (!Bitmap_EncodeRLE(bitstream, rleRepeatCount,
-					lastBlockFlag))
+		if (!Bitmap_EncodeRLE(bitstream, compBlockCtl.rleRepeatCount,
+					compBlockCtl.lastBlockFlag))
 			return false;
 	}
 	return true;
-
 }
 
 static bool
@@ -294,56 +276,46 @@ Bitmap_Compress_Write_Header(BitmapCompressionType compressionType,
 /*
  * Compresses the given bitmap data.
  * 
- * bitmapDataSize in uint32-words.
+ * blockCount in uint32-words.
+ *
  */ 
 int
 Bitmap_Compress(
-		BitmapCompressionType compressionType,
-		uint32* bitmap,
-		int bitmapDataSize,
-		unsigned char *outData,
-		int maxOutDataSize)
+		BitmapCompressionType	compressionType,
+		uint32					*bitmap,
+		int						blockCount,
+		unsigned char			*outData,
+		int						maxOutDataSize)
 {
 	Bitstream bitstream;
-	int blockCount;
 
-	Assert(maxOutDataSize >= (bitmapDataSize * sizeof(uint32) + 2));
+	Assert(maxOutDataSize >= (blockCount * sizeof(uint32) + 2));
 
 	memset(outData, 0, maxOutDataSize);
-	blockCount = bitmapDataSize;
 
 	/* Header 
 	 */
 	Bitstream_Init(&bitstream, outData, maxOutDataSize);
 	if (!Bitmap_Compress_Write_Header(compressionType,blockCount, &bitstream))
 		elog(ERROR, "Failed to write bitmap compression header");
-
 	/* bitmap content */
 	switch (compressionType)
 	{
 		case BITMAP_COMPRESSION_TYPE_NO:
-			// By assertion I know that I have sufficient space for this
-			if (bitmapDataSize == 0)
-			{
-				/* we only have the header */
-				return 2;
-			}
-			memcpy(Bitstream_GetAlignedData(&bitstream, 16), 
-					bitmap, bitmapDataSize * sizeof(uint32));
-			
-			return (bitmapDataSize * sizeof(uint32)) + 2;
+			return Bitmap_Compress_NoCompress(bitmap,
+											  blockCount,
+											  &bitstream);
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
-			if (!Bitmap_Compress_Default(bitmap, blockCount,
+			if (!Bitmap_Compress_DefaultCompress(bitmap, blockCount,
 						&bitstream))
 			{
 				/* This may happen when the input bitmap is not nicely compressible */
 				/* Fall back */
-
 				memset(outData, 0, maxOutDataSize);
 				return Bitmap_Compress(
 						BITMAP_COMPRESSION_TYPE_NO,
 						bitmap,
-						bitmapDataSize,
+						blockCount,
 						outData,
 						maxOutDataSize);
 			}
@@ -356,4 +328,117 @@ Bitmap_Compress(
 				"compression type %d", compressionType);
 			return 0;
 	}
+}
+
+/* Compress a particular bitmap block */
+static bool
+Bitmap_CompressBlock(BitmapCompressBlockController *compBlockCtl)
+{
+	/*
+	 * When
+	 *  1. current block equals to previous block
+	 *  2. repeat count <= 255
+	 *  3. current block is not the first block
+	 * We just increase the repeat count.
+	 */
+	if (compBlockCtl->blockData == compBlockCtl->lastBlockData
+		&& compBlockCtl->rleRepeatCount <= 255
+		&& !compBlockCtl->isFirstBlock)
+	{
+		(compBlockCtl->rleRepeatCount)++;
+	}
+	else
+	{
+		compBlockCtl->isFirstBlock = false;
+		/* Write the repeat code */
+		if (compBlockCtl->rleRepeatCount > 0)
+		{
+			if (!Bitmap_EncodeRLE(compBlockCtl->bitstream,
+								  compBlockCtl->rleRepeatCount,
+								  compBlockCtl->lastBlockFlag))
+			{
+				return false;
+			}
+			compBlockCtl->rleRepeatCount = 0;
+		}
+
+		/* Write the ZERO code */
+		if (compBlockCtl->blockData == 0)
+		{
+			if (!Bitstream_Put(compBlockCtl->bitstream,
+							   BITMAP_COMPRESSION_FLAG_ZERO,
+							   2))
+			{
+				return false;
+			}
+			compBlockCtl->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ZERO;
+		}
+		/* Write the ONE code */
+		else if (compBlockCtl->blockData == 0xFFFFFFFFU)
+		{
+			if (!Bitstream_Put(compBlockCtl->bitstream,
+							   BITMAP_COMPRESSION_FLAG_ONE,
+							   2))
+			{
+				return false;
+			}
+			compBlockCtl->lastBlockFlag = BITMAP_COMPRESSION_FLAG_ONE;
+		}
+		/* Write the RAW code */
+		else
+		{
+			if (!Bitstream_Put(compBlockCtl->bitstream,
+							   BITMAP_COMPRESSION_FLAG_RAW,
+							   2))
+			{
+				return false;
+			}
+			if (!Bitstream_Put(compBlockCtl->bitstream,
+							   compBlockCtl->blockData,
+							   32))
+			{
+				return false;
+			}
+			compBlockCtl->lastBlockFlag = BITMAP_COMPRESSION_FLAG_RAW;
+		}
+
+		compBlockCtl->lastBlockData = compBlockCtl->blockData;
+	}
+	return true;
+}
+
+/*
+ * Compress bitmap by BITMAP_COMPRESSION_TYPE_NO method
+ * (no actual compression, just copy data)
+ */
+static int
+Bitmap_Compress_NoCompress(
+		uint32*		bitmap,
+		int			blockCount,
+		Bitstream	*bitstream)
+{
+	unsigned char *offset;
+	int bitStreamLen;
+
+	if (blockCount == 0)
+	{
+		/* we only have the header */
+		return 2;
+	}
+
+	offset = Bitstream_GetAlignedData(bitstream, 16);
+	memcpy(offset,
+		   bitmap,
+		   blockCount * sizeof(uint32));
+
+	bitStreamLen = (blockCount * sizeof(uint32)) + 2;
+	/*
+	 * TODO:
+	 * The assertion failed because we directly wrote the bit stream but did not
+	 * update the offset. Maybe we can refactor the code by a more telegant way
+	 * in future.
+	 */
+	/* Assert(bitStreamLen == Bitstream_GetLength(bitstream)); */
+
+	return bitStreamLen;
 }
