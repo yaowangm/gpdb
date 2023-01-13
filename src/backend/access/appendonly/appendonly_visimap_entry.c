@@ -129,7 +129,10 @@ AppendOnlyVisimap_GetAttrNotNull(HeapTuple t, TupleDesc td, int attr)
 void
 AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t dataSize)
 {
-	int			newWordCount;
+	/* the block count of (ondisk) bitstream */
+	int			onDiskBlockCount = 0;
+	/* the word count of in-memory bitmapset */
+	int			bmsWordCount = 0;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
@@ -156,21 +159,52 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 * but I think it is reasonable to set it to NULLL to avoid similar issues.
 	 */
 	visiMapEntry->bitmap = NULL;
-	newWordCount =
+	onDiskBlockCount =
 		BitmapDecompress_GetBlockCount(&decompressState);
-	if (newWordCount > 0)
+	/* The on-disk bitmap representation always uses 32-bit block size
+	 * (for backward compatibility). Depending on the environment, we
+	 * may be using either * 64-bit words or 32-bit words for the
+	 * in-memory representation.
+	 * So, if (in-memory) bitmapset uses 64 bit words, we can use half
+	 * of the on-disk bitmap block count.
+	 */
+	if (BITS_PER_BITMAPWORD == 64)
+	{
+		/*
+		 * Number of on-disk blocks is always 0, 1 or even.
+		 * See resizing logic in AppendOnlyVisimapEntry_HideTuple()
+		 */
+		if (onDiskBlockCount == 1)
+		{
+			bmsWordCount = 1;
+		}
+		else
+		{
+			Assert(onDiskBlockCount % 2 == 0);
+			bmsWordCount = onDiskBlockCount / 2;
+		}
+	}
+	else
+	{
+		Assert(BITS_PER_BITMAPWORD == 32);
+		bmsWordCount = onDiskBlockCount;
+	}
+	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	Assert(bmsWordCount >= 0);
+
+	if (onDiskBlockCount > 0)
 	{
 		visiMapEntry->bitmap = palloc0(offsetof(Bitmapset, words) +
-									   (newWordCount * sizeof(bitmapword)));
-		visiMapEntry->bitmap->nwords = newWordCount;
+									   (bmsWordCount * sizeof(bitmapword)));
+		visiMapEntry->bitmap->nwords = bmsWordCount;
 		BitmapDecompress_Decompress(&decompressState,
-									visiMapEntry->bitmap->words,
-									newWordCount);
+									(uint32 *)visiMapEntry->bitmap->words,
+									onDiskBlockCount);
 	}
-	else if (newWordCount != 0)
+	else if (onDiskBlockCount != 0)
 	{
 		elog(ERROR,
-			 "illegal visimap block count: visimap block count %d", newWordCount);
+			 "illegal visimap block count: visimap block count %d", onDiskBlockCount);
 	}
 
 }
@@ -264,23 +298,84 @@ AppendOnlyVisimapEntry_GetHiddenTupleCount(
 void
 AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 {
-	int			bitmapSize,
-				compressedBitmapSize;
+	/* bitmap size, in bytes */
+	int	bitmapSize;
+	int	compressedBitmapSize;
+	/* word count in 64bit or 32bit words for in-memory bms */
+	int	bmsWordCount = 0;
+	/* block count always in 32bit (after conversion if necessary) */
+	int	blockCount = 0;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
 	Assert(AppendOnlyVisimapEntry_IsValid(visiMapEntry));
 
-	bitmapSize = (visiMapEntry->bitmap ? (visiMapEntry->bitmap->nwords * sizeof(bitmapword)) : 0);
+	if (visiMapEntry->bitmap)
+	{
+		bmsWordCount = visiMapEntry->bitmap->nwords;
+
+		/*
+		 * On 64bit env, there is a conflict: in-memory bms is in 64bit word,
+		 * but on-disk block is in 32bit word to keep consistency. We need to
+		 * provide 32bit block count to Bitmap_Compress() after kind of
+		 * conversion.
+		 */
+		if (BITS_PER_BITMAPWORD == 64)
+		{
+			/*
+			 * On 64bit env, if there is only one word in bms, and the last half
+			 * of the word is empty, it means there is only one 32bit word
+			 * actually.
+			 */
+			if (bmsWordCount == 1
+				&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
+			{
+				blockCount = 1;
+			}
+			else
+			{
+				/*
+				 * blockCount required by Bitmap_Compress() is always in
+				 * uint32-words. So, if bitmapset uses 64 bit words, double
+				 * the value of bmsWordCount.
+				 */
+				blockCount = visiMapEntry->bitmap->nwords * 2;
+			}
+		}
+		else
+		{
+			/*
+			 * On 32bit env, blockCount is always equal to bmsWordCount.
+			 */
+			blockCount = visiMapEntry->bitmap->nwords;
+		}
+	}
+	bitmapSize = sizeof(uint32) * blockCount;
 	bitmapSize += BITMAP_COMPRESSION_HEADER_SIZE;
+	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	Assert(visiMapEntry->data);
 	Assert(APPENDONLY_VISIMAP_DATA_BUFFER_SIZE >= bitmapSize);
+	/*
+	 * On production environment without assertion, we need to terminate
+	 * current backend if we hit the error.
+	 */
+	if (bitmapSize > APPENDONLY_VISIMAP_DATA_BUFFER_SIZE)
+	{
+		elog(FATAL,
+			 "incorrect bitmapSize: "
+			 "APPENDONLY_VISIMAP_DATA_BUFFER_SIZE = %lu, "
+			 "bitmapSize = %d, "
+			 "visiMapEntry->bitmap->nwords = %d",
+			 APPENDONLY_VISIMAP_DATA_BUFFER_SIZE,
+			 bitmapSize,
+			 visiMapEntry->bitmap->nwords);
+	}
 	visiMapEntry->data->version = 1;
 
 	compressedBitmapSize = Bitmap_Compress(BITMAP_COMPRESSION_TYPE_DEFAULT,
-										   (visiMapEntry->bitmap ? visiMapEntry->bitmap->words : NULL),
-										   (visiMapEntry->bitmap ? visiMapEntry->bitmap->nwords : 0),
+										   (visiMapEntry->bitmap ? (uint32*)visiMapEntry->bitmap->words : NULL),
+										   blockCount,
 										   visiMapEntry->data->data,
 										   bitmapSize);
 	Assert(compressedBitmapSize >= BITMAP_COMPRESSION_HEADER_SIZE);
@@ -481,6 +576,9 @@ AppendOnlyVisimapEntry_IsVisible(
 /*
  * The minimal size (in uint32's elements) the entry array needs to have to
  * cover the given offset
+ * Note that on 64 bit env, AppendOnlyVisimapEntry->bitmap uses 64 bit word,
+ * so the caller of AppendOnlyVisimapEntry_GetMinimalSizeToCover() need to
+ * half the returned value.
  */
 static uint32
 AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
@@ -499,6 +597,20 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	minSize |= minSize >> 8;
 	minSize |= minSize >> 16;
 	minSize++;
+
+	Assert(minSize <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	/*
+	 * On production environment without assertion, we need to terminate
+	 * current backend if we hit the error.
+	 */
+	if (minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT)
+	{
+		elog(FATAL,
+			 "incorrect minSize: offset=%ld, minSize=%u",
+			 offset,
+			 minSize);
+	}
+
 	return minSize;
 }
 

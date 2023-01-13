@@ -24,6 +24,14 @@ typedef enum BitmapCompressionFlag
 	BITMAP_COMPRESSION_FLAG_RAW = 0x03
 } BitmapCompressionFlag;
 
+static void
+Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
+						   uint32 *bitmap);
+
+static void
+Bitmap_Compress_DecompressNone(BitmapDecompressState *state,
+							   uint32 *bitmap);
+
 /*
  * Initializes a new decompression run
  */ 
@@ -80,19 +88,21 @@ BitmapDecompress_HasError(
 }
 
 /*
- * Performs the bitmap decompression.
+ * Perform bitmap decompression into in-memory buffer
  *
- * bitmapDataSize in uint32-words.
+ * bitmap: caller-allocated buffer that can hold state->blockCount
+ * number of 32-bit on-disk bitmap words.
+ *
+ * For both 32-bit and 64-bit in-memory bitmap word sizes, we write
+ * 32-bit words into the in-memory buffer contiguously. This is safe
+ * to do as we interpret two contiguous 32-bit words as one 64-bit
+ * word.
  */
 void
 BitmapDecompress_Decompress(BitmapDecompressState *state,
 							uint32 *bitmap,
 							int bitmapDataSize)
 {
-	uint32 lastBlockData, flag, rleRepeatCount;
-	int i;
-	bool failed = false;
-
 	Assert(state);
 	Assert(Bitstream_GetOffset(&state->bitstream) == 16U);
 
@@ -105,74 +115,11 @@ BitmapDecompress_Decompress(BitmapDecompressState *state,
 
 	if (state->compressionType == BITMAP_COMPRESSION_TYPE_NO)
 	{
-		memcpy(bitmap, 
-				Bitstream_GetAlignedData(&state->bitstream, 16), 
-				state->blockCount * sizeof(uint32));
+		Bitmap_Compress_DecompressNone(state, bitmap);
 	}
 	else if (state->compressionType == BITMAP_COMPRESSION_TYPE_DEFAULT)
 	{
-		lastBlockData = 0;
-		rleRepeatCount = 0;
-		for (i = 0; i < state->blockCount; i++)
-		{
-			if (rleRepeatCount == 0)
-			{
-
-				if (!Bitstream_Get(&state->bitstream, 2, &flag))
-				{
-					failed = true;
-					break;
-				}
-
-				switch (flag)
-				{
-					case BITMAP_COMPRESSION_FLAG_ZERO:
-						bitmap[i] = 0;
-						break;
-					case BITMAP_COMPRESSION_FLAG_ONE:
-						bitmap[i] = 0xFFFFFFFF;
-						break;
-					case BITMAP_COMPRESSION_FLAG_RAW:
-						if (!Bitstream_Get(&state->bitstream, 32, &bitmap[i]))
-						{
-							failed = true;
-							break;
-						}
-						break;
-					case BITMAP_COMPRESSION_FLAG_RLE:
-						Assert(i != 0);
-						if (!Bitstream_Get(&state->bitstream, 8, &rleRepeatCount))
-						{
-							failed = true;
-							break;
-						}
-						bitmap[i] = lastBlockData;
-						break;
-					default:
-						elog(ERROR, "Invalid compression flag");
-				}
-				lastBlockData = bitmap[i];
-			}
-			else
-			{
-				/* In an RLE block */
-				bitmap[i] = lastBlockData;
-				rleRepeatCount--;
-			}
-		}
-		if (rleRepeatCount > 0)
-		{
-			elog(ERROR, "illegal RLE state after bitmap decompression: "
-					"block count %d, compression type %d, rle repeat count %u",
-					state->blockCount, state->compressionType, rleRepeatCount);
-		}
-
-		if (failed)
-		{
-			elog(ERROR, "bitstream read error seen during decompression: "
-					"block count %d, compression type %d",
-					state->blockCount, state->compressionType);
-		}
+		Bitmap_Compress_DefaultDecompress(state, bitmap);
 	}
 	else
 	{
@@ -291,11 +238,6 @@ Bitmap_Compress_Write_Header(BitmapCompressionType compressionType,
 	return true;
 }
 
-/*
- * Compresses the given bitmap data.
- * 
- * bitmapDataSize in uint32-words.
- */ 
 int
 Bitmap_Compress(
 		BitmapCompressionType compressionType,
@@ -317,7 +259,6 @@ Bitmap_Compress(
 	Bitstream_Init(&bitstream, outData, maxOutDataSize);
 	if (!Bitmap_Compress_Write_Header(compressionType,blockCount, &bitstream))
 		elog(ERROR, "Failed to write bitmap compression header");
-
 	/* bitmap content */
 	switch (compressionType)
 	{
@@ -330,7 +271,7 @@ Bitmap_Compress(
 			}
 			memcpy(Bitstream_GetAlignedData(&bitstream, 16), 
 					bitmap, bitmapDataSize * sizeof(uint32));
-			
+
 			return (bitmapDataSize * sizeof(uint32)) + 2;
 		case BITMAP_COMPRESSION_TYPE_DEFAULT:
 			if (!Bitmap_Compress_Default(bitmap, blockCount,
@@ -356,4 +297,93 @@ Bitmap_Compress(
 				"compression type %d", compressionType);
 			return 0;
 	}
+}
+
+/*
+ * Decompress bitmap by BITMAP_COMPRESSION_TYPE_DEFAULT method
+ */
+static void
+Bitmap_Compress_DefaultDecompress(BitmapDecompressState *state,
+								  uint32 *bitmap)
+{
+	uint32	lastBlockData = 0;
+	uint32	rleRepeatCount = 0;
+	uint32	flag = 0;
+	bool	failed = false;
+	uint32	*nextPos = 0;
+
+	for (int i = 0; i < state->blockCount; i++)
+	{
+		nextPos = bitmap + i;
+
+		if (rleRepeatCount == 0)
+		{
+			if (!Bitstream_Get(&state->bitstream, 2, &flag))
+			{
+				failed = true;
+				break;
+			}
+			switch (flag)
+			{
+				case BITMAP_COMPRESSION_FLAG_ZERO:
+					*nextPos = 0;
+					break;
+				case BITMAP_COMPRESSION_FLAG_ONE:
+					*nextPos = 0xFFFFFFFF;
+					break;
+				case BITMAP_COMPRESSION_FLAG_RAW:
+					if (!Bitstream_Get(&state->bitstream, 32, nextPos))
+					{
+						failed = true;
+						break;
+					}
+					break;
+				case BITMAP_COMPRESSION_FLAG_RLE:
+					Assert(i != 0);
+					if (!Bitstream_Get(&state->bitstream, 8, &rleRepeatCount))
+					{
+						failed = true;
+						break;
+					}
+					*nextPos  = lastBlockData;
+					break;
+				default:
+					elog(ERROR, "Invalid compression flag");
+			}
+			lastBlockData = *nextPos;
+		}
+		else
+		{
+			/* In an RLE block */
+			*nextPos = lastBlockData;
+			rleRepeatCount--;
+		}
+	}
+	if (rleRepeatCount > 0)
+	{
+		elog(ERROR, "illegal RLE state after bitmap decompression: "
+					"block count %d, compression type %d, rle repeat count %u",
+			 state->blockCount, state->compressionType, rleRepeatCount);
+	}
+
+	if (failed)
+	{
+		elog(ERROR, "bitstream read error seen during decompression: "
+					"block count %d, compression type %d",
+		state->blockCount, state->compressionType);
+	}
+}
+
+/*
+ * Decompress bitmap by BITMAP_COMPRESSION_TYPE_NO method
+ * (no actual compression, just copy data)
+ */
+static void
+Bitmap_Compress_DecompressNone(BitmapDecompressState *state,
+							   uint32 *bitmap)
+{
+	/* Work for both 64bit and 32bit word */
+	memcpy(bitmap, 
+		   Bitstream_GetAlignedData(&state->bitstream, 16), 
+		   state->blockCount * sizeof(uint32));
 }
