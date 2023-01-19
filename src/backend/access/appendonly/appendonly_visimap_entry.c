@@ -323,9 +323,12 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 		if (BITS_PER_BITMAPWORD == 64)
 		{
 			/*
-			 * On 64bit env, if there is only one word in bms, and the last half
-			 * of the word is empty, it means there is only one 32bit word
-			 * actually.
+			 * On 64bit env, if there is only one 64 bit word in memory, and the
+			 * 32 higher order bits of that word are all zero, it implies that
+			 * there is only one 32 bit word. We can always assume that the 32
+			 * higher order bits for a 64 bit bitmap word is zeroed out - this
+			 * is ensured by routines such as bms_add_member() and 
+			 * AppendOnlyVisiMapEnty_ReadData().
 			 */
 			if (bmsWordCount == 1
 				&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
@@ -355,7 +358,6 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	Assert(visiMapEntry->data);
-	Assert(APPENDONLY_VISIMAP_DATA_BUFFER_SIZE >= bitmapSize);
 	/*
 	 * On production environment without assertion, we need to terminate
 	 * current backend if we hit the error.
@@ -598,7 +600,6 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	minSize |= minSize >> 16;
 	minSize++;
 
-	Assert(minSize <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 	/*
 	 * On production environment without assertion, we need to terminate
 	 * current backend if we hit the error.
