@@ -111,7 +111,7 @@ BitmapDecompress_Decompress(BitmapDecompressState *state,
 
 	if (state->compressionType == BITMAP_COMPRESSION_TYPE_NO)
 	{
-		memcpy(bitmap, 
+		memcpy(bitmap,
 				Bitstream_GetAlignedData(&state->bitstream, 16), 
 				state->blockCount * sizeof(uint32));
 	}
