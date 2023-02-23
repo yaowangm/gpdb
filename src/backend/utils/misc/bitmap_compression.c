@@ -366,12 +366,17 @@ Bitmap_Compress(
 }
 
 /*
- * returns the word count of bitmapset
+ * Calculate two counts for read:
+ * 1. the block count of (ondisk) bitstream
+ * 2. the word count of in-memory bitmapset
  */
-int BitmapDecompress_GetBmsWordCount(
-	int onDiskBlockCount)
+void BitmapDecompress_CalculateBlockCountsForRead(
+	BitmapDecompressState *decompressState,
+	int *onDiskBlockCount,
+	int *bmsWordCount)
 {
-	int bmsWordCount = 0;
+	*onDiskBlockCount =
+		BitmapDecompress_GetBlockCount(decompressState);
 
 	/* The on-disk bitmap representation always uses 32-bit block size
 	 * (for backward compatibility). Depending on the environment, we
@@ -386,23 +391,21 @@ int BitmapDecompress_GetBmsWordCount(
 		 * Number of on-disk blocks is always 0, 1 or even.
 		 * See resizing logic in AppendOnlyVisimapEntry_HideTuple()
 		 */
-		if (onDiskBlockCount == 1)
+		if (*onDiskBlockCount == 1)
 		{
-			bmsWordCount = 1;
+			*bmsWordCount = 1;
 		}
 		else
 		{
-			Assert(onDiskBlockCount % 2 == 0);
-			bmsWordCount = onDiskBlockCount / 2;
+			Assert(*onDiskBlockCount % 2 == 0);
+			*bmsWordCount = *onDiskBlockCount / 2;
 		}
 	}
 	else
 	{
 		Assert(BITS_PER_BITMAPWORD == 32);
-		bmsWordCount = onDiskBlockCount;
+		*bmsWordCount = *onDiskBlockCount;
 	}
-	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
-	Assert(bmsWordCount >= 0);
-
-	return bmsWordCount;
+	Assert(*bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	Assert(*bmsWordCount >= 0);
 }

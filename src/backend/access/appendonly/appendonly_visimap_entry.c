@@ -159,9 +159,10 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 * but I think it is reasonable to set it to NULLL to avoid similar issues.
 	 */
 	visiMapEntry->bitmap = NULL;
-	onDiskBlockCount =
-		BitmapDecompress_GetBlockCount(&decompressState);
-	bmsWordCount = BitmapDecompress_GetBmsWordCount(onDiskBlockCount);
+	BitmapDecompress_CalculateBlockCountsForRead(
+		&decompressState,
+		&onDiskBlockCount,
+		&bmsWordCount);
 
 	if (onDiskBlockCount > 0)
 	{

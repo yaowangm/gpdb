@@ -109,8 +109,10 @@ int Bitmap_Compress(
 		unsigned char *outData,
 		int maxOutDataSize);
 
-int BitmapDecompress_GetBmsWordCount(
-	int onDiskBlockCount);
+void BitmapDecompress_CalculateBlockCountsForRead(
+	BitmapDecompressState *decompressState,
+	int *onDiskBlockCount,
+	int *bmsWordCount);
 
 #endif
 
