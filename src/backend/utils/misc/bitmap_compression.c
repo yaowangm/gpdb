@@ -15,6 +15,7 @@
 #include "utils/bitmap_compression.h"
 #include "utils/bitstream.h"
 #include "utils/guc.h"
+#include "access/appendonly_visimap.h"
 
 typedef enum BitmapCompressionFlag
 {
@@ -362,4 +363,46 @@ Bitmap_Compress(
 				"compression type %d", compressionType);
 			return 0;
 	}
+}
+
+/*
+ * returns the word count of bitmapset
+ */
+int BitmapDecompress_GetBmsWordCount(
+	int onDiskBlockCount)
+{
+	int bmsWordCount = 0;
+
+	/* The on-disk bitmap representation always uses 32-bit block size
+	 * (for backward compatibility). Depending on the environment, we
+	 * may be using either 64-bit words or 32-bit words for the
+	 * in-memory representation.
+	 * So, if (in-memory) bitmapset uses 64 bit words, we can use half
+	 * of the on-disk bitmap block count.
+	 */
+	if (BITS_PER_BITMAPWORD == 64)
+	{
+		/*
+		 * Number of on-disk blocks is always 0, 1 or even.
+		 * See resizing logic in AppendOnlyVisimapEntry_HideTuple()
+		 */
+		if (onDiskBlockCount == 1)
+		{
+			bmsWordCount = 1;
+		}
+		else
+		{
+			Assert(onDiskBlockCount % 2 == 0);
+			bmsWordCount = onDiskBlockCount / 2;
+		}
+	}
+	else
+	{
+		Assert(BITS_PER_BITMAPWORD == 32);
+		bmsWordCount = onDiskBlockCount;
+	}
+	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	Assert(bmsWordCount >= 0);
+
+	return bmsWordCount;
 }
