@@ -159,7 +159,7 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 * but I think it is reasonable to set it to NULLL to avoid similar issues.
 	 */
 	visiMapEntry->bitmap = NULL;
-	BitmapDecompress_CalculateBlockCountsForRead(
+	BitmapDecompress_CalculateBlockCounts(
 		&decompressState,
 		&onDiskBlockCount,
 		&bmsWordCount);
@@ -282,49 +282,10 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
 	Assert(AppendOnlyVisimapEntry_IsValid(visiMapEntry));
 
-	if (visiMapEntry->bitmap)
-	{
-		bmsWordCount = visiMapEntry->bitmap->nwords;
-
-		/*
-		 * On 64bit env, there is a conflict: in-memory bms is in 64bit word,
-		 * but on-disk block is in 32bit word to keep consistency. We need to
-		 * provide 32bit block count to Bitmap_Compress() after kind of
-		 * conversion.
-		 */
-		if (BITS_PER_BITMAPWORD == 64)
-		{
-			/*
-			 * On 64bit env, if there is only one 64 bit word in memory, and the
-			 * 32 higher order bits of that word are all zero, it implies that
-			 * there is only one 32 bit word. We can always assume that the 32
-			 * higher order bits for a 64 bit bitmap word is zeroed out - this
-			 * is ensured by routines such as bms_add_member() and 
-			 * AppendOnlyVisiMapEnty_ReadData().
-			 */
-			if (bmsWordCount == 1
-				&& (visiMapEntry->bitmap->words[0] >> 32) == 0)
-			{
-				blockCount = 1;
-			}
-			else
-			{
-				/*
-				 * blockCount required by Bitmap_Compress() is always in
-				 * uint32-words. So, if bitmapset uses 64 bit words, double
-				 * the value of bmsWordCount.
-				 */
-				blockCount = visiMapEntry->bitmap->nwords * 2;
-			}
-		}
-		else
-		{
-			/*
-			 * On 32bit env, blockCount is always equal to bmsWordCount.
-			 */
-			blockCount = visiMapEntry->bitmap->nwords;
-		}
-	}
+	BitmapCompress_CalculateBlockCounts(
+		visiMapEntry->bitmap,
+		&blockCount,
+		&bmsWordCount);
 	bitmapSize = sizeof(uint32) * blockCount;
 	bitmapSize += BITMAP_COMPRESSION_HEADER_SIZE;
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);

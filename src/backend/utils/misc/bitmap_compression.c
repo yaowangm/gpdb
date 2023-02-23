@@ -370,7 +370,7 @@ Bitmap_Compress(
  * 1. the block count of (ondisk) bitstream
  * 2. the word count of in-memory bitmapset
  */
-void BitmapDecompress_CalculateBlockCountsForRead(
+void BitmapDecompress_CalculateBlockCounts(
 	BitmapDecompressState *decompressState,
 	int *onDiskBlockCount,
 	int *bmsWordCount)
@@ -408,4 +408,54 @@ void BitmapDecompress_CalculateBlockCountsForRead(
 	}
 	Assert(*bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 	Assert(*bmsWordCount >= 0);
+}
+
+void BitmapCompress_CalculateBlockCounts(
+	Bitmapset *bitmap,
+	int *onDiskBlockCount,
+	int *bmsWordCount)
+{
+	if (bitmap)
+	{
+		*bmsWordCount = bitmap->nwords;
+
+		/*
+		 * On 64bit env, there is a conflict: in-memory bms is in 64bit word,
+		 * but on-disk block is in 32bit word to keep consistency. We need to
+		 * provide 32bit block count to Bitmap_Compress() after kind of
+		 * conversion.
+		 */
+		if (BITS_PER_BITMAPWORD == 64)
+		{
+			/*
+			 * On 64bit env, if there is only one 64 bit word in memory, and the
+			 * 32 higher order bits of that word are all zero, it implies that
+			 * there is only one 32 bit word. We can always assume that the 32
+			 * higher order bits for a 64 bit bitmap word is zeroed out - this
+			 * is ensured by routines such as bms_add_member() and
+			 * AppendOnlyVisiMapEnty_ReadData().
+			 */
+			if (*bmsWordCount == 1
+				&& (bitmap->words[0] >> 32) == 0)
+			{
+				*onDiskBlockCount = 1;
+			}
+			else
+			{
+				/*
+				 * onDiskBlockCount required by Bitmap_Compress() is always in
+				 * uint32-words. So, if bitmapset uses 64 bit words, double
+				 * the value of bmsWordCount.
+				 */
+				*onDiskBlockCount = bitmap->nwords * 2;
+			}
+		}
+		else
+		{
+			/*
+			 * On 32bit env, onDiskBlockCount is always equal to bmsWordCount.
+			 */
+			*onDiskBlockCount = bitmap->nwords;
+		}
+	}
 }
