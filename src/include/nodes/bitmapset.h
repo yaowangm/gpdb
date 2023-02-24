@@ -39,6 +39,12 @@ struct List;
  *
  * TODO: enable 64-bit words for big-endian machine if possible
  */
+
+/* FIXME: tbm_bitmapword is Greenplum specific 64-bit wide type used for
+ * TID bitmaps. Since we have enabled 64-bit bms, can we start using
+ * bitmapword for TID bitmaps, just like upastream, and eliminate
+ * tbm_bitmapword?
+ */
 #if ((SIZEOF_VOID_P >= 8) && (!defined WORDS_BIGENDIAN))
 
 #define BITS_PER_BITMAPWORD 64
