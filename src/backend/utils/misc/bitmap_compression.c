@@ -366,7 +366,7 @@ Bitmap_Compress(
 }
 
 /*
- * Calculate two counts for read:
+ * Calculate two counts for decompress:
  * 1. the block count of (ondisk) bitstream
  * 2. the word count of in-memory bitmapset
  */
@@ -410,6 +410,11 @@ void BitmapDecompress_CalculateBlockCounts(
 	Assert(*bmsWordCount >= 0);
 }
 
+/*
+ * Calculate two counts for compress:
+ * 1. the block count of (ondisk) bitstream
+ * 2. the word count of in-memory bitmapset
+ */
 void BitmapCompress_CalculateBlockCounts(
 	Bitmapset *bitmap,
 	int *onDiskBlockCount,
