@@ -289,21 +289,7 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	Assert(visiMapEntry->data);
-	/*
-	 * On production environment without assertion, we need to terminate
-	 * current backend if we hit the error.
-	 */
-	if (bitmapSize > APPENDONLY_VISIMAP_DATA_BUFFER_SIZE)
-	{
-		elog(FATAL,
-			 "incorrect bitmapSize: "
-			 "APPENDONLY_VISIMAP_DATA_BUFFER_SIZE = %lu, "
-			 "bitmapSize = %d, "
-			 "visiMapEntry->bitmap->nwords = %d",
-			 APPENDONLY_VISIMAP_DATA_BUFFER_SIZE,
-			 bitmapSize,
-			 visiMapEntry->bitmap->nwords);
-	}
+	Assert(APPENDONLY_VISIMAP_DATA_BUFFER_SIZE >= bitmapSize);
 	visiMapEntry->data->version = 1;
 
 	compressedBitmapSize = Bitmap_Compress(BITMAP_COMPRESSION_TYPE_DEFAULT,
@@ -509,9 +495,6 @@ AppendOnlyVisimapEntry_IsVisible(
 /*
  * The minimal size (in uint32's elements) the entry array needs to have to
  * cover the given offset
- * Note that on 64 bit env, AppendOnlyVisimapEntry->bitmap uses 64 bit word,
- * so the caller of AppendOnlyVisimapEntry_GetMinimalSizeToCover() need to
- * half the returned value.
  */
 static uint32
 AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
@@ -529,19 +512,13 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	minSize |= minSize >> 4;
 	minSize |= minSize >> 8;
 	minSize |= minSize >> 16;
+	if (BITS_PER_BITMAPWORD == 64)
+		minSize |= minSize >> 32;
+	else
+		Assert(BITS_PER_BITMAPWORD == 32);
 	minSize++;
 
-	/*
-	 * On production environment without assertion, we need to terminate
-	 * current backend if we hit the error.
-	 */
-	if (minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT)
-	{
-		elog(FATAL,
-			 "incorrect minSize: offset=%ld, minSize=%u",
-			 offset,
-			 minSize);
-	}
+	Assert(minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	return minSize;
 }

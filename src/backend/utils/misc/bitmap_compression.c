@@ -367,13 +367,12 @@ Bitmap_Compress(
 
 /*
  * Calculate two counts for decompress:
- * 1. the block count of (ondisk) bitstream
- * 2. the word count of in-memory bitmapset
+ * 1. 'onDiskBlockCount': the block count of (ondisk) bitstream
+ * 2. 'bmsWordCount': the word count of in-memory bitmapset
  */
-void BitmapDecompress_CalculateBlockCounts(
-	BitmapDecompressState *decompressState,
-	int *onDiskBlockCount,
-	int *bmsWordCount)
+void BitmapDecompress_CalculateBlockCounts(BitmapDecompressState *decompressState,
+										   int *onDiskBlockCount,
+										   int *bmsWordCount)
 {
 	*onDiskBlockCount =
 		BitmapDecompress_GetBlockCount(decompressState);
@@ -392,9 +391,7 @@ void BitmapDecompress_CalculateBlockCounts(
 		 * See resizing logic in AppendOnlyVisimapEntry_HideTuple()
 		 */
 		if (*onDiskBlockCount == 1)
-		{
 			*bmsWordCount = 1;
-		}
 		else
 		{
 			Assert(*onDiskBlockCount % 2 == 0);
@@ -412,13 +409,12 @@ void BitmapDecompress_CalculateBlockCounts(
 
 /*
  * Calculate two counts for compress:
- * 1. the block count of (ondisk) bitstream
- * 2. the word count of in-memory bitmapset
+ * 1. 'onDiskBlockCount': the block count of (ondisk) bitstream
+ * 2. 'bmsWordCount': the word count of in-memory bitmapset
  */
-void BitmapCompress_CalculateBlockCounts(
-	Bitmapset *bitmap,
-	int *onDiskBlockCount,
-	int *bmsWordCount)
+void BitmapCompress_CalculateBlockCounts(Bitmapset *bitmap,
+										 int *onDiskBlockCount,
+										 int *bmsWordCount)
 {
 	*onDiskBlockCount = 0;
 	*bmsWordCount = 0;
@@ -460,6 +456,8 @@ void BitmapCompress_CalculateBlockCounts(
 		}
 		else
 		{
+			Assert(BITS_PER_BITMAPWORD == 32);
+
 			/*
 			 * On 32bit env, onDiskBlockCount is always equal to bmsWordCount.
 			 */
