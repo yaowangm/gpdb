@@ -37,8 +37,7 @@
 #define APPENDONLY_VISIMAP_MAX_BITMAP_SIZE 4096
 
 /*
- * The max value of visiMapEntry->bitmap->nwords, depending on bitmapword:
- * 512 for 64hit; 1024 for 32bit
+ * The max value of visiMapEntry->bitmap->nwords
  */
 #define APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT \
 	(APPENDONLY_VISIMAP_MAX_BITMAP_SIZE / sizeof(bitmapword))

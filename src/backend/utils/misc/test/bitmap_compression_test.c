@@ -39,7 +39,7 @@ test__BitmapCompression__ZeroBitmap(void **state)
 
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
-		bitmap, 4,
+		bitmap, onDiskBlockCount,
 		output, 20);
 	assert_true(r < sizeof(uint32) * 4 && r >= 0);
 	uint32 bitmap2[4];
@@ -59,7 +59,7 @@ test__BitmapCompression__ZeroBitmap(void **state)
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
 	BitmapDecompress_Decompress(&decomp_state,
-		bitmap2, 4);
+		bitmap2, onDiskBlockCount);
 	assert_memory_equal(bitmap, bitmap2, sizeof(uint32) * 4);
 }
 
@@ -99,7 +99,7 @@ test__BitmapCompression__Raw(void **state)
 
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
-		bitmap, blockCount,
+		bitmap, onDiskBlockCount,
 		output, sizeof(uint32) * 5);
 	assert_true(r < sizeof(uint32) * blockCount && r >= 0);
 	uint32 bitmap2[4];
@@ -119,7 +119,7 @@ test__BitmapCompression__Raw(void **state)
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
 	BitmapDecompress_Decompress(&decomp_state,
-		bitmap2, blockCount);
+		bitmap2, onDiskBlockCount);
 	assert_memory_equal(bitmap, bitmap2, sizeof(uint32) * blockCount);
 }
 
@@ -159,7 +159,7 @@ test__BitmapCompression__ExplicitNoCompression(void **state)
 
 	int r = Bitmap_Compress(
 			BITMAP_COMPRESSION_TYPE_NO, 
-		bitmap, blockCount,
+		bitmap, onDiskBlockCount,
 		output, sizeof(uint32) * 5);
 	assert_int_equal(r, (sizeof(uint32) * 4) + 2);
 
@@ -180,7 +180,7 @@ test__BitmapCompression__ExplicitNoCompression(void **state)
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
 	BitmapDecompress_Decompress(&decomp_state,
-		bitmap2, blockCount);
+		bitmap2, onDiskBlockCount);
 	assert_memory_equal(bitmap, bitmap2, sizeof(uint32) * blockCount);
 }
 
@@ -205,7 +205,7 @@ test__BitmapCompression__ExplicitNoCompressionNoBlocks(void **state)
 
 	int r = Bitmap_Compress(
 			BITMAP_COMPRESSION_TYPE_NO, 
-		bitmap, blockCount,
+		bitmap, onDiskBlockCount,
 		output, sizeof(uint32) * 5);
 	assert_int_equal(r, 2);
 
@@ -226,7 +226,7 @@ test__BitmapCompression__ExplicitNoCompressionNoBlocks(void **state)
 	assert_int_equal(0, bmsWordCount);
 
 	BitmapDecompress_Decompress(&decomp_state,
-		bitmap2, blockCount);
+		bitmap2, onDiskBlockCount);
 }
 
 static void
@@ -265,7 +265,7 @@ test__BitmapCompression__ImplicitNoCompression(void **state)
 
 	int r = Bitmap_Compress(
 			BITMAP_COMPRESSION_TYPE_DEFAULT, 
-		bitmap, blockCount,
+		bitmap, onDiskBlockCount,
 		output, 18);
 	assert_int_equal(r, (sizeof(uint32) * 4) + 2);
 
@@ -286,7 +286,7 @@ test__BitmapCompression__ImplicitNoCompression(void **state)
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
 	BitmapDecompress_Decompress(&decomp_state,
-		bitmap2, blockCount);
+		bitmap2, onDiskBlockCount);
 	assert_memory_equal(bitmap, bitmap2, sizeof(uint32) * blockCount);
 }
 
@@ -337,7 +337,7 @@ test__BitmapCompression__MultipleTypeBitmap(void **state)
 
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
-		bitmap, 16,
+		bitmap, onDiskBlockCount,
 		output, sizeof(uint32) * 17);
 	assert_true(r < sizeof(uint32) * 16 && r >= 0);
 	uint32 bitmap2[16];
@@ -357,7 +357,7 @@ test__BitmapCompression__MultipleTypeBitmap(void **state)
 	assert_int_equal(16, BitmapDecompress_GetBlockCount(&decomp_state));
 
 	BitmapDecompress_Decompress(&decomp_state,
-		bitmap2, 16);
+		bitmap2, onDiskBlockCount);
 	assert_memory_equal(bitmap, bitmap2, sizeof(uint32) * 16);
 }
 
@@ -398,7 +398,7 @@ test__BitmapCompression_ShortDecompress(void **state)
 	/* fake a bitmapset with the bitmap data */
 	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
-	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
+	memcpy(bms->words, bitmap, sizeof(uint32) * 16);
 
 	BitmapCompress_CalculateBlockCounts(bms,
 										&onDiskBlockCount,
@@ -408,7 +408,7 @@ test__BitmapCompression_ShortDecompress(void **state)
 
 	int r = Bitmap_Compress(
 		BITMAP_COMPRESSION_TYPE_DEFAULT, 
-		bitmap, 16,
+		bitmap, onDiskBlockCount,
 		output, sizeof(uint32) * 17);
 	assert_true(r < sizeof(uint32) * 16 && r >= 0);
 	uint32 bitmap2[16];
@@ -439,7 +439,7 @@ test__BitmapCompression_ShortDecompress(void **state)
 
 		PG_TRY();
 		{
-			BitmapDecompress_Decompress(&decomp_state, bitmap2, 16);
+			BitmapDecompress_Decompress(&decomp_state, bitmap2, onDiskBlockCount);
 			assert_true(false); /*should not be reached */
 		}
 		PG_CATCH();
@@ -464,7 +464,7 @@ test__BitmapCompression__IllegalCompressionType(void **state)
 	int bmsWordCount = 0;
 	/*
 	 * When onDiskBlockCount is 1, bmsWordCount is always 1 for
-	 * both 64bit and  32bit bms.
+	 * both 64bit and 32bit bms.
 	 */
 	int expectedBmwWordCount = 1;
 	Bitmapset *bms;
@@ -484,7 +484,7 @@ test__BitmapCompression__IllegalCompressionType(void **state)
 	{
 		Bitmap_Compress(
 		14, 
-		bitmap, blockCount,
+		bitmap, onDiskBlockCount,
 		output, sizeof(uint32) * 5);
 		assert_true(false); /*should not be reached */
 	}
