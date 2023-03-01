@@ -31,10 +31,9 @@ test__BitmapCompression__ZeroBitmap(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(4, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -53,10 +52,9 @@ test__BitmapCompression__ZeroBitmap(void **state)
 			BitmapDecompress_GetCompressionType(&decomp_state));
 	assert_int_equal(4, BitmapDecompress_GetBlockCount(&decomp_state));
 
-	BitmapDecompress_CalculateBlockCounts(
-		&decomp_state,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decomp_state,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 	assert_int_equal(4, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -93,10 +91,9 @@ test__BitmapCompression__Raw(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(4, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -115,10 +112,9 @@ test__BitmapCompression__Raw(void **state)
 			BitmapDecompress_GetCompressionType(&decomp_state));
 	assert_int_equal(blockCount, BitmapDecompress_GetBlockCount(&decomp_state));
 
-	BitmapDecompress_CalculateBlockCounts(
-		&decomp_state,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decomp_state,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 	assert_int_equal(blockCount, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -155,10 +151,9 @@ test__BitmapCompression__ExplicitNoCompression(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(4, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -178,10 +173,9 @@ test__BitmapCompression__ExplicitNoCompression(void **state)
 			BitmapDecompress_GetCompressionType(&decomp_state));
 	assert_int_equal(blockCount, BitmapDecompress_GetBlockCount(&decomp_state));
 
-	BitmapDecompress_CalculateBlockCounts(
-		&decomp_state,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decomp_state,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 	assert_int_equal(blockCount, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -203,10 +197,9 @@ test__BitmapCompression__ExplicitNoCompressionNoBlocks(void **state)
 	int onDiskBlockCount = 0;
 	int bmsWordCount = 0;
 
-	BitmapCompress_CalculateBlockCounts(
-		NULL,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(NULL,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(0, onDiskBlockCount);
 	assert_int_equal(0, bmsWordCount);
 
@@ -226,10 +219,9 @@ test__BitmapCompression__ExplicitNoCompressionNoBlocks(void **state)
 			BitmapDecompress_GetCompressionType(&decomp_state));
 	assert_int_equal(blockCount, BitmapDecompress_GetBlockCount(&decomp_state));
 
-	BitmapDecompress_CalculateBlockCounts(
-		&decomp_state,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decomp_state,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 	assert_int_equal(blockCount, onDiskBlockCount);
 	assert_int_equal(0, bmsWordCount);
 
@@ -265,10 +257,9 @@ test__BitmapCompression__ImplicitNoCompression(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(4, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -288,10 +279,9 @@ test__BitmapCompression__ImplicitNoCompression(void **state)
 			BitmapDecompress_GetCompressionType(&decomp_state));
 	assert_int_equal(blockCount, BitmapDecompress_GetBlockCount(&decomp_state));
 
-	BitmapDecompress_CalculateBlockCounts(
-		&decomp_state,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decomp_state,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 	assert_int_equal(blockCount, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -339,10 +329,9 @@ test__BitmapCompression__MultipleTypeBitmap(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(16, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -361,10 +350,9 @@ test__BitmapCompression__MultipleTypeBitmap(void **state)
 			BitmapDecompress_GetCompressionType(&decomp_state));
 	assert_int_equal(16, BitmapDecompress_GetBlockCount(&decomp_state));
 
-	BitmapDecompress_CalculateBlockCounts(
-		&decomp_state,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decomp_state,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 	assert_int_equal(16, onDiskBlockCount);
 	assert_int_equal(16, BitmapDecompress_GetBlockCount(&decomp_state));
 
@@ -412,10 +400,9 @@ test__BitmapCompression_ShortDecompress(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(16, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 
@@ -487,10 +474,9 @@ test__BitmapCompression__IllegalCompressionType(void **state)
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32));
 
-	BitmapCompress_CalculateBlockCounts(
-		bms,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(bms,
+										&onDiskBlockCount,
+										&bmsWordCount);
 	assert_int_equal(1, onDiskBlockCount);
 	assert_int_equal(expectedBmwWordCount, bmsWordCount);
 

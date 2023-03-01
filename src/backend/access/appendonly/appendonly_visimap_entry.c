@@ -130,9 +130,9 @@ void
 AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t dataSize)
 {
 	/* the block count of (ondisk) bitstream */
-	int			onDiskBlockCount = 0;
+	int			onDiskBlockCount;
 	/* the word count of in-memory bitmapset */
-	int			bmsWordCount = 0;
+	int			bmsWordCount;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
@@ -159,10 +159,9 @@ AppendOnlyVisiMapEnty_ReadData(AppendOnlyVisimapEntry *visiMapEntry, size_t data
 	 * but I think it is reasonable to set it to NULLL to avoid similar issues.
 	 */
 	visiMapEntry->bitmap = NULL;
-	BitmapDecompress_CalculateBlockCounts(
-		&decompressState,
-		&onDiskBlockCount,
-		&bmsWordCount);
+	BitmapDecompress_CalculateBlockCounts(&decompressState,
+										  &onDiskBlockCount,
+										  &bmsWordCount);
 
 	if (onDiskBlockCount > 0)
 	{
@@ -274,18 +273,17 @@ AppendOnlyVisimapEntry_WriteData(AppendOnlyVisimapEntry *visiMapEntry)
 	int	bitmapSize;
 	int	compressedBitmapSize;
 	/* word count in 64bit or 32bit words for in-memory bms */
-	int	bmsWordCount = 0;
+	int	bmsWordCount;
 	/* block count always in 32bit (after conversion if necessary) */
-	int	blockCount = 0;
+	int	blockCount;
 
 	Assert(visiMapEntry);
 	Assert(CurrentMemoryContext == visiMapEntry->memoryContext);
 	Assert(AppendOnlyVisimapEntry_IsValid(visiMapEntry));
 
-	BitmapCompress_CalculateBlockCounts(
-		visiMapEntry->bitmap,
-		&blockCount,
-		&bmsWordCount);
+	BitmapCompress_CalculateBlockCounts(visiMapEntry->bitmap,
+										&blockCount,
+										&bmsWordCount);
 	bitmapSize = sizeof(uint32) * blockCount;
 	bitmapSize += BITMAP_COMPRESSION_HEADER_SIZE;
 	Assert(bmsWordCount <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
