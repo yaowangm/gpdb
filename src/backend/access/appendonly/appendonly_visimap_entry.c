@@ -512,13 +512,9 @@ AppendOnlyVisimapEntry_GetMinimalSizeToCover(int64 offset)
 	minSize |= minSize >> 4;
 	minSize |= minSize >> 8;
 	minSize |= minSize >> 16;
-	if (BITS_PER_BITMAPWORD == 64)
-		minSize |= minSize >> 32;
-	else
-		Assert(BITS_PER_BITMAPWORD == 32);
 	minSize++;
 
-	Assert(minSize > APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
+	Assert(minSize <= APPENDONLY_VISIMAP_MAX_BITMAP_WORD_COUNT);
 
 	return minSize;
 }
