@@ -20,8 +20,8 @@
 #include "access/multixact.h"
 #include "access/tableam.h"
 #include "access/xact.h"
+#include "catalog/aoseg.h"
 #include "catalog/catalog.h"
-#include "catalog/gp_fastsequence.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/pg_appendonly.h"
@@ -1923,6 +1923,66 @@ aoco_relation_size(Relation rel, ForkNumber forkNumber)
 	return totalbytes;
 }
 
+/*
+ * For each AO segment, get the starting heap block number and the number of
+ * heap blocks (together termed as a BlockSequence). The starting heap block
+ * number is always deterministic given a segment number. See AOtupleId.
+ *
+ * The number of heap blocks can be determined from the last row number present
+ * in the segment. See appendonlytid.h for details.
+ */
+static BlockSequence *
+aoco_relation_get_block_sequences(Relation rel, int *numSequences)
+{
+	Snapshot			snapshot;
+	Oid					segrelid;
+	int					nsegs;
+	BlockSequence		*sequences;
+	AOCSFileSegInfo 	**seginfos;
+
+	Assert(RelationIsValid(rel));
+	Assert(numSequences);
+
+	snapshot = RegisterSnapshot(GetCatalogSnapshot(InvalidOid));
+
+	seginfos = GetAllAOCSFileSegInfo(rel, snapshot, &nsegs, &segrelid);
+	sequences = (BlockSequence *) palloc(sizeof(BlockSequence) * nsegs);
+	*numSequences = nsegs;
+
+	/*
+	 * For each aoseg, the sequence starts at a fixed heap block number and
+	 * contains up to the highest numbered heap block corresponding to the
+	 * lastSequence value of that segment.
+	 */
+	for (int i = 0; i < nsegs; i++)
+		AOSegment_PopulateBlockSequence(&sequences[i], segrelid, seginfos[i]->segno);
+
+	UnregisterSnapshot(snapshot);
+
+	if (seginfos != NULL)
+	{
+		FreeAllAOCSSegFileInfo(seginfos, nsegs);
+		pfree(seginfos);
+	}
+
+	return sequences;
+}
+
+/*
+ * Populate the BlockSequence corresponding to the AO segment in which the
+ * logical heap block 'blkNum' falls.
+ */
+static void
+aoco_relation_get_block_sequence(Relation rel,
+								 BlockNumber blkNum,
+								 BlockSequence *sequence)
+{
+	Oid segrelid;
+
+	GetAppendOnlyEntryAuxOids(rel, &segrelid, NULL, NULL, NULL, NULL);
+	AOSegment_PopulateBlockSequence(sequence, segrelid, AOSegmentGet_segno(blkNum));
+}
+
 static bool
 aoco_relation_needs_toast_table(Relation rel)
 {
@@ -2180,6 +2240,8 @@ static const TableAmRoutine ao_column_methods = {
 	.index_validate_scan = aoco_index_validate_scan,
 
 	.relation_size = aoco_relation_size,
+	.relation_get_block_sequences = aoco_relation_get_block_sequences,
+	.relation_get_block_sequence = aoco_relation_get_block_sequence,
 	.relation_needs_toast_table = aoco_relation_needs_toast_table,
 
 	.relation_estimate_size = aoco_estimate_rel_size,
