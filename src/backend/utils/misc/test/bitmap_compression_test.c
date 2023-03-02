@@ -453,7 +453,6 @@ test__BitmapCompression_ShortDecompress(void **state)
 static void
 test__BitmapCompression__IllegalCompressionType(void **state)
 {
-	int blockCount = 0;
 	uint32 bitmap[1];
 	memset(bitmap, 0, sizeof(uint32) * 1);
 
