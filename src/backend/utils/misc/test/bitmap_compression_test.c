@@ -27,7 +27,7 @@ test__BitmapCompression__ZeroBitmap(void **state)
 	Bitmapset *bms;
 
 	/* fake a bitmapset with the bitmap data */
-	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
+	bms = (Bitmapset *) palloc(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
@@ -87,7 +87,7 @@ test__BitmapCompression__Raw(void **state)
 	Bitmapset *bms;
 
 	/* fake a bitmapset with the bitmap data */
-	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
+	bms = (Bitmapset *) palloc(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
@@ -147,7 +147,7 @@ test__BitmapCompression__ExplicitNoCompression(void **state)
 	Bitmapset *bms;
 
 	/* fake a bitmapset with the bitmap data */
-	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
+	bms = (Bitmapset *) palloc(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
@@ -253,7 +253,7 @@ test__BitmapCompression__ImplicitNoCompression(void **state)
 	Bitmapset *bms;
 
 	/* fake a bitmapset with the bitmap data */
-	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
+	bms = (Bitmapset *) palloc(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
@@ -325,7 +325,7 @@ test__BitmapCompression__MultipleTypeBitmap(void **state)
 	Bitmapset *bms;
 
 	/* fake a bitmapset with the bitmap data */
-	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
+	bms = (Bitmapset *) palloc(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 4);
 
@@ -396,7 +396,7 @@ test__BitmapCompression_ShortDecompress(void **state)
 	Bitmapset *bms;
 
 	/* fake a bitmapset with the bitmap data */
-	bms = (Bitmapset *) palloc0(BITMAPSET_SIZE(expectedBmwWordCount));
+	bms = (Bitmapset *) palloc(BITMAPSET_SIZE(expectedBmwWordCount));
 	bms->nwords = expectedBmwWordCount;
 	memcpy(bms->words, bitmap, sizeof(uint32) * 16);
 
