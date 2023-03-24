@@ -554,6 +554,9 @@ CREATE VIEW pg_config AS
 REVOKE ALL on pg_config FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION pg_config() FROM PUBLIC;
 
+CREATE VIEW pg_backend_memory_contexts AS
+    SELECT * FROM pg_get_backend_memory_contexts();
+
 -- Statistics views
 
 CREATE VIEW pg_stat_all_tables_internal AS
@@ -961,6 +964,19 @@ CREATE VIEW gp_stat_replication AS
          ON G.gp_segment_id = R.gp_segment_id
     );
 
+CREATE VIEW pg_stat_slru AS
+    SELECT
+            s.name,
+            s.blks_zeroed,
+            s.blks_hit,
+            s.blks_read,
+            s.blks_written,
+            s.blks_exists,
+            s.flushes,
+            s.truncates,
+            s.stats_reset
+    FROM pg_stat_get_slru() s;
+
 CREATE VIEW pg_stat_wal_receiver AS
     SELECT
             s.pid,
@@ -1029,7 +1045,9 @@ CREATE VIEW pg_replication_slots AS
             L.xmin,
             L.catalog_xmin,
             L.restart_lsn,
-            L.confirmed_flush_lsn
+            L.confirmed_flush_lsn,
+            L.wal_status,
+            L.safe_wal_size
     FROM pg_get_replication_slots() AS L
             LEFT JOIN pg_database D ON (L.datoid = D.oid);
 
@@ -1339,6 +1357,39 @@ CREATE VIEW pg_stat_bgwriter AS
         pg_stat_get_buf_alloc() AS buffers_alloc,
         pg_stat_get_bgwriter_stat_reset_time() AS stats_reset;
 
+CREATE VIEW pg_stat_wal AS
+    SELECT
+        w.wal_records,
+        w.wal_fpw,
+        w.wal_bytes,
+        w.wal_buffers_full,
+        w.wal_write,
+        w.wal_sync,
+        w.wal_write_time,
+        w.wal_sync_time,
+        w.stats_reset
+    FROM pg_stat_get_wal() w;
+CREATE VIEW pg_stat_progress_analyze AS
+    SELECT
+        S.pid AS pid, S.datid AS datid, D.datname AS datname,
+        CAST(S.relid AS oid) AS relid,
+        CASE S.param1 WHEN 0 THEN 'initializing'
+                      WHEN 1 THEN 'acquiring sample rows'
+                      WHEN 2 THEN 'acquiring inherited sample rows'
+                      WHEN 3 THEN 'computing statistics'
+                      WHEN 4 THEN 'computing extended statistics'
+                      WHEN 5 THEN 'finalizing analyze'
+                      END AS phase,
+        S.param2 AS sample_blks_total,
+        S.param3 AS sample_blks_scanned,
+        S.param4 AS ext_stats_total,
+        S.param5 AS ext_stats_computed,
+        S.param6 AS child_tables_total,
+        S.param7 AS child_tables_done,
+        CAST(S.param8 AS oid) AS current_child_table_relid
+    FROM pg_stat_get_progress_info('ANALYZE') AS S
+        LEFT JOIN pg_database D ON S.datid = D.oid;
+
 CREATE VIEW pg_stat_progress_vacuum AS
     SELECT
         S.pid AS pid, S.datid AS datid, D.datname AS datname,
@@ -1350,6 +1401,9 @@ CREATE VIEW pg_stat_progress_vacuum AS
                       WHEN 4 THEN 'cleaning up indexes'
                       WHEN 5 THEN 'truncating heap'
                       WHEN 6 THEN 'performing final cleanup'
+                      WHEN 7 THEN 'append-optimized pre-cleanup'
+                      WHEN 8 THEN 'append-optimized compact'
+                      WHEN 9 THEN 'append-optimized post-cleanup'
                       END AS phase,
         S.param2 AS heap_blks_total, S.param3 AS heap_blks_scanned,
         S.param4 AS heap_blks_vacuumed, S.param5 AS index_vacuum_count,
@@ -1374,6 +1428,8 @@ CREATE VIEW pg_stat_progress_cluster AS
                       WHEN 5 THEN 'swapping relation files'
                       WHEN 6 THEN 'rebuilding index'
                       WHEN 7 THEN 'performing final cleanup'
+                      WHEN 8 THEN 'seq scanning append-optimized'
+                      WHEN 9 THEN 'writing new append-optimized'
                       END AS phase,
         CAST(S.param3 AS oid) AS cluster_index_relid,
         S.param4 AS heap_tuples_scanned,
@@ -1417,6 +1473,42 @@ CREATE VIEW pg_stat_progress_create_index AS
         S.param14 AS partitions_total,
         S.param15 AS partitions_done
     FROM pg_stat_get_progress_info('CREATE INDEX') AS S
+        LEFT JOIN pg_database D ON S.datid = D.oid;
+
+CREATE VIEW pg_stat_progress_basebackup AS
+    SELECT
+        S.pid AS pid,
+        CASE S.param1 WHEN 0 THEN 'initializing'
+                      WHEN 1 THEN 'waiting for checkpoint to finish'
+                      WHEN 2 THEN 'estimating backup size'
+                      WHEN 3 THEN 'streaming database files'
+                      WHEN 4 THEN 'waiting for wal archiving to finish'
+                      WHEN 5 THEN 'transferring wal files'
+                      END AS phase,
+        CASE S.param2 WHEN -1 THEN NULL ELSE S.param2 END AS backup_total,
+        S.param3 AS backup_streamed,
+        S.param4 AS tablespaces_total,
+        S.param5 AS tablespaces_streamed
+    FROM pg_stat_get_progress_info('BASEBACKUP') AS S;
+
+
+CREATE VIEW pg_stat_progress_copy AS
+    SELECT
+        S.pid AS pid, S.datid AS datid, D.datname AS datname,
+        S.relid AS relid,
+        CASE S.param5 WHEN 1 THEN 'COPY FROM'
+                      WHEN 2 THEN 'COPY TO'
+                      END AS command,
+        CASE S.param6 WHEN 1 THEN 'FILE'
+                      WHEN 2 THEN 'PROGRAM'
+                      WHEN 3 THEN 'PIPE'
+                      WHEN 4 THEN 'CALLBACK'
+                      END AS "type",
+        S.param1 AS bytes_processed,
+        S.param2 AS bytes_total,
+        S.param3 AS tuples_processed,
+        S.param4 AS tuples_excluded
+    FROM pg_stat_get_progress_info('COPY') AS S
         LEFT JOIN pg_database D ON S.datid = D.oid;
 
 CREATE VIEW pg_user_mappings AS
@@ -1704,6 +1796,7 @@ REVOKE EXECUTE ON FUNCTION pg_promote(boolean, integer) FROM public;
 
 REVOKE EXECUTE ON FUNCTION pg_stat_reset() FROM public;
 REVOKE EXECUTE ON FUNCTION pg_stat_reset_shared(text) FROM public;
+REVOKE EXECUTE ON FUNCTION pg_stat_reset_slru(text) FROM public;
 REVOKE EXECUTE ON FUNCTION pg_stat_reset_single_table_counters(oid) FROM public;
 REVOKE EXECUTE ON FUNCTION pg_stat_reset_single_function_counters(oid) FROM public;
 
@@ -1730,6 +1823,8 @@ REVOKE EXECUTE ON FUNCTION pg_stat_file(text,boolean) FROM public;
 
 REVOKE EXECUTE ON FUNCTION pg_ls_dir(text) FROM public;
 REVOKE EXECUTE ON FUNCTION pg_ls_dir(text,boolean,boolean) FROM public;
+
+REVOKE EXECUTE ON FUNCTION pg_log_backend_memory_contexts(integer) FROM PUBLIC;
 
 --
 -- GPDB: These GPDB-specific catalog functions need to have their

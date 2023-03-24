@@ -45,8 +45,6 @@ endfunction()
 # IN-ArrayCmp
 # NOT-IN-ArrayCmp
 
-# GPDB_12_MERGE_FIXME: re-add the following test to Right Join once DPE is supported
-# RightJoinDPS PartTbl-RightOuterHashJoin-DPE-IsNull
 
 # minidump tests must follow rule:
 # "CxxxTest: file1 file2; CxxxTest: file3 file4"
@@ -105,13 +103,13 @@ CIndexScanTest:
 BTreeIndex-Against-InList BTreeIndex-Against-InListLarge BTreeIndex-Against-ScalarSubquery
 IndexScan-AOTable IndexScan-DroppedColumns IndexScan-BoolTrue IndexScan-BoolFalse
 IndexScan-Relabel IndexGet-OuterRefs LogicalIndexGetDroppedCols
-IndexScan-ORPredsNonPart IndexScan-ORPredsAOPart IndexScan-AndedIn SubqInIndexPred;
+IndexScan-ORPredsNonPart IndexScan-ORPredsAOPart IndexScan-AndedIn SubqInIndexPred Hash-IndexScan;
 
 CBitmapScanTest:
 IndexedNLJBitmap BitmapIndex-ChooseHashJoin BitmapTableScan-AO-Btree-PickOnlyHighNDV
 BitmapIndex-Against-InList BitmapTableScan-AO-Btree-PickIndexWithNoGap
 BitmapTableScan-ComplexConjDisj BitmapTableScan-ConjDisjWithOuterRefs
-BRINScan-Or BitmapScan-Hetrogeneous-Partitioned;
+BRINScan-Or BitmapScan-Hetrogeneous-Partitioned Hash-BitmapScan;
 
 CIndexApplyTest:
 IndexNLJ-IndexGet-OuterRef IndexApply_NestLoopWithNestParamTrue IndexApply1
@@ -169,7 +167,7 @@ CTAS-random-distributed-from-replicated-distributed-table
 ProjectRepeatedColumn1 ProjectRepeatedColumn2 NLJ-BC-Outer-Spool-Inner Self-Comparison Self-Comparison-Nullable
 SelectCheckConstraint ExpandJoinOrder SelectOnBpchar EqualityJoin EffectsOfJoinFilter InnerJoin-With-OuterRefs
 UDA-AnyElement-1 UDA-AnyElement-2 Project-With-NonScalar-Func SixWayDPv2 Join-Varchar-Equality NLJ-Rewindability
-NLJ-Rewindability-CTAS;
+NLJ-Rewindability-CTAS DisableBroadcastThreshold;
 
 CJoinPredTest:
 MultipleDampedPredJoinCardinality MultipleIndependentPredJoinCardinality MultiDistKeyJoinCardinality
@@ -178,7 +176,9 @@ JoinOnViewWithCastedColumn JoinOnViewWithCastedColumnAndSubqueryInPredicate Join
 JoinOnViewWithMixOfPushableAndNonpushablePredicates JoinOnViewWithSetReturningColumn OuterJoinOnViewWithCastedColumn JoinWithSubqueryProjectColumn
 AggSubqCollapseFalseFilter NestedJoinWithCastedColumn PushConstantSelectPredicateThruJoin-1 PushConstantSelectPredicateThruJoin-2
 PushConstantSelectPredicateThruJoin-3 PushConstantSelectPredicateThruJoin-4 PushConstantSelectPredicateThruJoin-5 PushConstantSelectPredicateThruJoin-6
-PushConstantSelectPredicateThruJoin-7 PushConstantSelectPredicateThruJoin-8 PushConstantSelectPredicateThruJoin-9 PushConstantSelectPredicateThruJoin-10;
+PushConstantSelectPredicateThruJoin-7 PushConstantSelectPredicateThruJoin-8 PushConstantSelectPredicateThruJoin-9 PushConstantSelectPredicateThruJoin-10
+PushConstantSelectPredicateThruJoin-11 PushConstantSelectPredicateThruJoin-12 PushConstantSelectPredicateThruJoin-13
+PushConstantSelectPredicateThruJoin-14 PushConstantSelectPredicateThruJoin-15;
 
 CArrayCmpTest:
 ArrayConcat ArrayRef FoldedArrayCmp ArrayCmpAll
@@ -365,7 +365,8 @@ CIndexOnlyScanTest:
 IndexOnlyScan-NoDistKeyInIndex IndexConstraintsMDidCache;
 
 CRightJoinTest:
-RightJoinHashed RightJoinRedistribute RightJoinReplicated RightJoinBothReplicated RightJoinNoDPSNonDistKey RightJoinTVF;
+RightJoinHashed RightJoinRedistribute RightJoinReplicated RightJoinBothReplicated RightJoinNoDPSNonDistKey RightJoinTVF
+RightJoinDPE PartTbl-RightOuterHashJoin-DPE-IsNull-V2 RightJoinDpeWithWhereClause;
 
 CSqlFunctionTest:
 SqlFuncNullReject SqlFuncPredFactorize SqlFuncDmlScalar SqlFuncDmlTvf CompositeTypeRelMdId;
@@ -377,7 +378,10 @@ COrderedAggTest:
 CTAS_OrderedAgg_multiple_cols OrderedAgg_multiple_diffcol OrderedAgg_with_groupby OrderedAgg_computed_col
 OrderedAggUsingGroupColumnInDirectArg OrderedAgg_multiple_samecol OrderedAgg_with_nonOrderedAgg OrderedAgg_single
 OrderedAgg_array_fraction OrderedAgg_multiple_samecol_difforderespec OrderedAgg_with_nonconst_fraction
-OrderedAgg_skewed_data
+OrderedAgg_skewed_data;
+
+CForeignPartTest:
+ForeignPartUniform PartForeignMixed PartForeignDifferentServer PartForeignDifferentExecLocation PartForeignMixedDPE PartForeignMixedSPE PartForeignUniformSPE
 ")
 
 set(mdp_dir "../data/dxl/minidump/")

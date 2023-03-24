@@ -1535,8 +1535,9 @@ CTranslatorDXLToScalar::TranslateDXLScalarArrayCoerceExprToScalar(
 		FuncExpr *func_expr = MakeNode(FuncExpr);
 		func_expr->funcid = elemfuncid;
 		func_expr->funcformat = COERCE_EXPLICIT_CAST;
-		// GPDB_12_MERGE_FIXME: shouldn't this come from the DXL as well?
-		func_expr->funcresulttype = gpdb::GetFuncRetType(elemfuncid);
+		func_expr->funcresulttype =
+			CMDIdGPDB::CastMdid(dxlop->GetResultTypeMdId())->Oid();
+
 		// FIXME: this is a giant hack. We really should know the arity of the
 		//   function we're calling. Instead, we're jamming three arguments,
 		//   _always_
@@ -2094,10 +2095,6 @@ CTranslatorDXLToScalar::TranslateDXLScalarValuesListToScalar(
 
 	return (Expr *) values;
 }
-//
-// GPDB_12_MERGE_FIXME: ArrayRef was renamed in commit 558d77f20e4e9.
-// I've fixed the renamed type and fields but the wording "ArrayRef" is
-// still everywhere. Do we plan to rename them?
 
 //---------------------------------------------------------------------------
 //	@function:

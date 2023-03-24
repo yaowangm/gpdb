@@ -40,6 +40,7 @@ Greenplum Database 7 requires the following software packages on RHEL systems. T
 -   openssl
 -   openssl-libs
 -   perl
+-   python39
 -   readline
 -   rsync
 -   R
@@ -53,8 +54,6 @@ VMware Greenplum Database 7 client software requires these operating system pack
 -   apr-util
 -   libyaml
 -   libevent
-
-Greenplum Database 7 uses Python 2.7.12, which is included with the product installation \(and not installed as a package dependency\).
 
 > **Important** SSL is supported only on the Greenplum Database coordinator host system. It cannot be used on the segment host systems.
 
@@ -185,7 +184,7 @@ This table lists the versions of the Greenplum Extensions that are compatible wi
 </tr>
 <tr class="row">
 <td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e683 "><a class="xref" href="../analytics/pl_r.html">PL/R</a></td>
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">3.0.3</td>
+<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">3.1.0</td>
 <td class="entry cell-norowborder" style="vertical-align:top;" headers="d78288e689 ">(CentOS) R 3.3.3<p class="p"> (Ubuntu) You install R 3.5.1+.</p>
 </td>
 </tr>
@@ -211,23 +210,8 @@ This table lists the versions of the Greenplum Extensions that are compatible wi
 </td>
 </tr>
 <tr class="row">
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e683 ">PL/Container Beta</td>
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">3.0.0-beta</td>
-<td class="entry cell-norowborder" style="vertical-align:top;" headers="d78288e689 "> </td>
-</tr>
-<tr class="row">
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e683 ">PL/Container Beta Image for R </td>
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">3.0.0-beta</td>
-<td class="entry cell-norowborder" style="vertical-align:top;" headers="d78288e689 ">R 3.4.4</td>
-</tr>
-<tr class="row">
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e683 "><a class="xref" href="../analytics/greenplum_r_client.html">GreenplumR</a></td>
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">1.1.0</td>
-<td class="entry cell-norowborder" style="vertical-align:top;" headers="d78288e689 ">Supports R 3.6+.</td>
-</tr>
-<tr class="row">
 <td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e683 "><a class="xref" href="../analytics/madlib.html">MADlib Machine Learning</a></td>
-<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">1.19, 1.18, 1.17, 1.16</td>
+<td class="entry nocellnorowborder" style="vertical-align:top;" headers="d78288e686 ">1.21, 1.20, 1.19, 1.18, 1.17, 1.16</td>
 <td class="entry cell-norowborder" style="vertical-align:top;" headers="d78288e689 ">Support matrix at <a class="xref" href="https://cwiki.apache.org/confluence/display/MADLIB/FAQ#FAQ-Q1-2WhatdatabaseplatformsdoesMADlibsupportandwhatistheupgradematrix?" target="_blank">MADlib FAQ</a>.</td>
 </tr>
 <tr class="row">

@@ -244,7 +244,7 @@ public:
 		BOOL is_distinct, EAggfuncStage eaggfuncstage, BOOL fSplit,
 		IMDId *
 			pmdidResolvedReturnType,  // return type to be used if original return type is ambiguous
-		EAggfuncKind aggkind, ULongPtrArray *argtypes);
+		EAggfuncKind aggkind, ULongPtrArray *argtypes, BOOL fRepSafe);
 
 	// generate an aggregate function
 	static CExpression *PexprAggFunc(CMemoryPool *mp, IMDId *pmdidAggFunc,
@@ -437,6 +437,8 @@ public:
 	//-------------------------------------------------------------------
 	// Helpers for comparisons
 	//-------------------------------------------------------------------
+
+	static CExpression *PexprOpComEquality(CMemoryPool *mp, CExpression *pexpr);
 
 	// deduplicate array of expressions
 	static CExpressionArray *PdrgpexprDedup(CMemoryPool *mp,
@@ -1319,10 +1321,6 @@ CUtils::FMatchDynamicScan(T *pop1, COperator *pop2)
 	T *popScan2 = T::PopConvert(pop2);
 
 	// match if the table descriptors are identical
-	// Possible improvement:
-	// For partial scans, we use pointer comparison of part constraints to avoid
-	// memory allocation because matching function was used while holding spin locks.
-	// Using a match function would mean improved matches for partial scans.
 	return pop1->ScanId() == popScan2->ScanId() &&
 		   pop1->Ptabdesc()->MDId()->Equals(popScan2->Ptabdesc()->MDId()) &&
 		   pop1->PdrgpcrOutput()->Equals(popScan2->PdrgpcrOutput());

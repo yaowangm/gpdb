@@ -83,7 +83,7 @@ InsertInitialAOCSFileSegInfo(Relation prel, int32 segno, int32 nvp, Oid segrelid
 	ValidateAppendonlySegmentDataBeforeStorage(segno);
 
 	/* New segments are always created in the latest format */
-	formatVersion = AORelationVersion_GetLatest();
+	formatVersion = AOSegfileFormatVersion_GetLatest();
 
 	segrel = heap_open(segrelid, RowExclusiveLock);
 
@@ -217,12 +217,10 @@ GetAOCSFileSegInfo(Relation prel,
 	Datum	   *d;
 	bool	   *null;
 	bool		isNull;
+	Oid 		segrelid;
 
-    Oid         segrelid;
-    GetAppendOnlyEntryAuxOids(prel->rd_id,
-                              appendOnlyMetaDataSnapshot,
-                              &segrelid, NULL, NULL,
-                              NULL, NULL);
+	GetAppendOnlyEntryAuxOids(prel,
+					&segrelid, NULL, NULL);
 
 	segrel = heap_open(segrelid, AccessShareLock);
 	tupdesc = RelationGetDescr(segrel);
@@ -327,9 +325,8 @@ GetAllAOCSFileSegInfo(Relation prel,
 
 	Assert(RelationIsAoCols(prel));
 
-	GetAppendOnlyEntryAuxOids(prel->rd_id,
-							  appendOnlyMetaDataSnapshot,
-							  &segrelid, NULL, NULL,
+	GetAppendOnlyEntryAuxOids(prel,
+							  &segrelid,
 							  NULL, NULL);
 
 	if (segrelid == InvalidOid)
@@ -586,19 +583,14 @@ MarkAOCSFileSegInfoAwaitingDrop(Relation prel, int segno)
 	Assert(RelationIsAoCols(prel));
 
 	appendOnlyMetaDataSnapshot = RegisterSnapshot(GetCatalogSnapshot(InvalidOid));
-	GetAppendOnlyEntryAuxOids(prel->rd_id,
-							  appendOnlyMetaDataSnapshot,
-							  &segrelid, NULL, NULL,
+	GetAppendOnlyEntryAuxOids(prel,
+							  &segrelid,
 							  NULL, NULL);
 	UnregisterSnapshot(appendOnlyMetaDataSnapshot);
 
 	segrel = heap_open(segrelid, RowExclusiveLock);
 	tupdesc = RelationGetDescr(segrel);
 
-	/*
-	 * Since we have the segment-file entry under lock (with
-	 * LockRelationAppendOnlySegmentFile) we can use SnapshotNow.
-	 */
 	scan = table_beginscan_catalog(segrel, 0, NULL);
 	while (segno != tuple_segno && (oldtup = heap_getnext(scan, ForwardScanDirection)) != NULL)
 	{
@@ -679,19 +671,14 @@ ClearAOCSFileSegInfo(Relation prel, int segno)
 		   RelationGetRelationName(prel));
 
 	appendOnlyMetaDataSnapshot = RegisterSnapshot(GetCatalogSnapshot(InvalidOid));
-	GetAppendOnlyEntryAuxOids(prel->rd_id,
-							  appendOnlyMetaDataSnapshot,
-							  &segrelid, NULL, NULL,
+	GetAppendOnlyEntryAuxOids(prel,
+							  &segrelid,
 							  NULL, NULL);
 	UnregisterSnapshot(appendOnlyMetaDataSnapshot);
 
 	segrel = heap_open(segrelid, RowExclusiveLock);
 	tupdesc = RelationGetDescr(segrel);
 
-	/*
-	 * Since we have the segment-file entry under lock (with
-	 * LockRelationAppendOnlySegmentFile) we can use SnapshotNow.
-	 */
 	scan = table_beginscan_catalog(segrel, 0, NULL);
 	while (segno != tuple_segno && (oldtup = heap_getnext(scan, ForwardScanDirection)) != NULL)
 	{
@@ -727,7 +714,7 @@ ClearAOCSFileSegInfo(Relation prel, int segno)
 	repl[Anum_pg_aocs_varblockcount - 1] = true;
 
 	/* When the segment is later recreated, it will be in new format */
-	d[Anum_pg_aocs_formatversion - 1] = Int16GetDatum(AORelationVersion_GetLatest());
+	d[Anum_pg_aocs_formatversion - 1] = Int16GetDatum(AOSegfileFormatVersion_GetLatest());
 	repl[Anum_pg_aocs_formatversion - 1] = true;
 
 	/* We do not reset the modcount here */
@@ -779,10 +766,6 @@ UpdateAOCSFileSegInfo(AOCSInsertDesc idesc)
 	segrel = heap_open(idesc->segrelid, RowExclusiveLock);
 	tupdesc = RelationGetDescr(segrel);
 
-	/*
-	 * Since we have the segment-file entry under lock (with
-	 * LockRelationAppendOnlySegmentFile) we can use SnapshotNow.
-	 */
 	scan = systable_beginscan(segrel, InvalidOid, false, idesc->appendOnlyMetaDataSnapshot, 0, NULL);
 	while (idesc->cur_segno != tuple_segno && (oldtup = systable_getnext(scan)) != NULL)
 	{
@@ -970,17 +953,12 @@ AOCSFileSegInfoAddVpe(Relation prel, int32 segno,
 	}
 
     Oid         segrelid;
-    GetAppendOnlyEntryAuxOids(prel->rd_id,
-                              NULL,
-                              &segrelid, NULL, NULL,
+    GetAppendOnlyEntryAuxOids(prel,
+                              &segrelid,
                               NULL, NULL);
 	segrel = heap_open(segrelid, RowExclusiveLock);
 	tupdesc = RelationGetDescr(segrel);
 
-	/*
-	 * Since we have the segment-file entry under lock (with
-	 * LockRelationAppendOnlySegmentFile) we can use SnapshotNow.
-	 */
 	scan = systable_beginscan(segrel, InvalidOid, false, NULL, 0, NULL);
 	while (segno != tuple_segno && (oldtup = systable_getnext(scan)) != NULL)
 	{
@@ -1089,18 +1067,13 @@ AOCSFileSegInfoAddCount(Relation prel, int32 segno,
 	TupleDesc	tupdesc;
 
     Oid         segrelid;
-    GetAppendOnlyEntryAuxOids(prel->rd_id,
-                              NULL,
-                              &segrelid, NULL, NULL,
+    GetAppendOnlyEntryAuxOids(prel,
+                              &segrelid,
                               NULL, NULL);
 
 	segrel = heap_open(segrelid, RowExclusiveLock);
 	tupdesc = RelationGetDescr(segrel);
 
-	/*
-	 * Since we have the segment-file entry under lock (with
-	 * LockRelationAppendOnlySegmentFile) we can use SnapshotNow.
-	 */
 	scan = systable_beginscan(segrel, InvalidOid, false, NULL, 0, NULL);
 	while (segno != tuple_segno && (oldtup = systable_getnext(scan)) != NULL)
 	{
@@ -1223,6 +1196,7 @@ gp_aocsseg_internal(PG_FUNCTION_ARGS, Oid aocsRelOid)
 		Relation	aocsRel;
 		Relation	pg_aocsseg_rel;
 		Snapshot	appendOnlyMetaDataSnapshot = RegisterSnapshot(GetLatestSnapshot());
+		Oid		segrelid;
 
 		/* create a function context for cross-call persistence */
 		funcctx = SRF_FIRSTCALL_INIT();
@@ -1267,7 +1241,8 @@ gp_aocsseg_internal(PG_FUNCTION_ARGS, Oid aocsRelOid)
 		context->aocsRelOid = aocsRelOid;
 
 		aocsRel = heap_open(aocsRelOid, AccessShareLock);
-		if (!RelationIsAoCols(aocsRel))
+		if (!RelationIsAoCols(aocsRel) ||
+				aocsRel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("'%s' is not an append-only columnar relation",
@@ -1276,11 +1251,9 @@ gp_aocsseg_internal(PG_FUNCTION_ARGS, Oid aocsRelOid)
 		/* Remember the number of columns. */
 		context->relnatts = aocsRel->rd_rel->relnatts;
 
-        Oid         segrelid;
-        GetAppendOnlyEntryAuxOids(aocsRel->rd_id,
-                                  appendOnlyMetaDataSnapshot,
-                                  &segrelid, NULL, NULL,
-                                  NULL, NULL);
+		GetAppendOnlyEntryAuxOids(aocsRel,
+						&segrelid,
+						NULL, NULL);
 		pg_aocsseg_rel = heap_open(segrelid, AccessShareLock);
 
 		context->aocsSegfileArray = GetAllAOCSFileSegInfo_pg_aocsseg_rel(
@@ -1432,6 +1405,7 @@ gp_aocsseg_history(PG_FUNCTION_ARGS)
 		MemoryContext oldcontext;
 		Relation	aocsRel;
 		Relation	pg_aocsseg_rel;
+		Oid		segrelid;
 
 		/* create a function context for cross-call persistence */
 		funcctx = SRF_FIRSTCALL_INIT();
@@ -1488,11 +1462,9 @@ gp_aocsseg_history(PG_FUNCTION_ARGS)
 		/* Remember the number of columns. */
 		context->relnatts = aocsRel->rd_rel->relnatts;
 
-        Oid         segrelid;
-        GetAppendOnlyEntryAuxOids(aocsRel->rd_id,
-                                  NULL,
-                                  &segrelid, NULL, NULL,
-                                  NULL, NULL);
+		GetAppendOnlyEntryAuxOids(aocsRel,
+						&segrelid,
+						NULL, NULL);
 
 		pg_aocsseg_rel = heap_open(segrelid, AccessShareLock);
 
@@ -1613,8 +1585,8 @@ aocol_compression_ratio_internal(Relation parentrel)
 
 	Oid			segrelid = InvalidOid;
 
-	GetAppendOnlyEntryAuxOids(RelationGetRelid(parentrel), NULL,
-							  &segrelid, NULL, NULL, NULL, NULL);
+	GetAppendOnlyEntryAuxOids(parentrel,
+							  &segrelid, NULL, NULL);
 	Assert(OidIsValid(segrelid));
 
 	/*

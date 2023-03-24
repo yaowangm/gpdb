@@ -4070,6 +4070,9 @@ ProcessInterrupts(const char* filename, int lineno)
 
 	if (ParallelMessagePending)
 		HandleParallelMessages();
+
+	if (LogMemoryContextPending)
+		ProcessLogMemoryContextInterrupt();
 }
 
 /*
@@ -5164,12 +5167,6 @@ PostgresMain(int argc, char *argv[],
 		 * queries
 		 */
 		IdleTracker_DeactivateProcess();
-
-		/*
-		 * Also consider releasing our catalog snapshot if any, so that it's
-		 * not preventing advance of global xmin while we wait for the client.
-		 */
-		InvalidateCatalogSnapshotConditionally();
 
 		/*
 		 * Also consider releasing our catalog snapshot if any, so that it's
