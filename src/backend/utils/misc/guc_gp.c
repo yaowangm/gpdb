@@ -1551,6 +1551,19 @@ struct config_bool ConfigureNamesBool_gp[] =
 		NULL, NULL, NULL
 	},
 
+#ifdef USE_ASSERT_CHECKING
+	{
+		{"gp_debug_disable_wipemem", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Disable wipe_mem() for debugging."),
+			NULL,
+			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
+		},
+		&gp_debug_disable_wipemem,
+		false,
+		NULL, NULL, NULL
+	},
+#endif
+
 	{
 		{"debug_walrepl_snd", PGC_SUSET, DEVELOPER_OPTIONS,
 			gettext_noop("Print debug messages for WAL sender in WAL based replication (Coordinator Mirroring)."),

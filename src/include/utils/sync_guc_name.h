@@ -42,6 +42,7 @@
 		"gp_blockdirectory_entry_min_range",
 		"gp_blockdirectory_minipage_size",
 		"gp_debug_linger",
+		"gp_debug_disable_wipemem",
 		"gp_default_storage_options",
 		"gp_disable_tuple_hints",
 		"gp_enable_interconnect_aggressive_retry",
