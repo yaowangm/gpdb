@@ -324,6 +324,12 @@ ExecDynamicIndexScan(DynamicIndexScanState *node)
 		{
 			endCurrentIndexScan(node);
 
+			/*
+			 * After endCurrentIndexScan(), slot should have been released
+			 * if it pointed to an empty tuple.
+			 */
+			slot = NULL;
+
 			node->scan_state = SCAN_INIT;
 		}
 	}

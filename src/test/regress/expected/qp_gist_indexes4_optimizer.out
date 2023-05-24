@@ -870,6 +870,48 @@ EXPLAIN SELECT count(*) FROM gist_tbl, gist_tbl2
 (11 rows)
 
 -- ----------------------------------------------------------------------
+-- Test: test15_dangling_pointer.sql
+-- ----------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+-- PURPOSE:
+--     This tests if we will hit any dangling pointer in dynamic index scan.
+-- ----------------------------------------------------------------------------
+CREATE TABLE rank (id int, rank int, year int, gender
+        char(1), count int)
+DISTRIBUTED BY (id)
+PARTITION BY RANGE (year)
+( START (2006) END (2016) EVERY (1),
+          DEFAULT PARTITION extra );
+insert into rank
+select i, i, 2005+i%10, 'g', i
+from generate_series(1, 100)i;
+create index idx_year on rank(year);
+create index idx_rank on rank(rank);
+analyze rank;
+set optimizer_enable_dynamictablescan = off;
+set optimizer_enable_bitmapscan = off;
+explain select count(1) from rank where year < 2008 and rank < 50;
+                                                   QUERY PLAN
+----------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=0.00..6.00 rows=1 width=8)
+   ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..6.00 rows=1 width=8)
+         ->  Aggregate  (cost=0.00..6.00 rows=1 width=8)
+               ->  Sequence  (cost=0.00..6.00 rows=5 width=1)
+                     ->  Partition Selector for rank (dynamic scan id: 1)  (cost=10.00..100.00 rows=34 width=4)
+                           Partitions selected: 3 (out of 11)
+                     ->  Dynamic Index Scan on rank (dynamic scan id: 1)  (cost=0.00..6.00 rows=5 width=1)
+                           Index Cond: (year < 2008)
+                           Filter: ((year < 2008) AND (rank < 50))
+ Optimizer: Pivotal Optimizer (GPORCA)
+(10 rows)
+
+select count(1) from rank where year < 2008 and rank < 50;
+ count 
+-------
+    14
+(1 row)
+
+-- ----------------------------------------------------------------------
 -- Test: teardown.sql
 -- ----------------------------------------------------------------------
 -- start_ignore

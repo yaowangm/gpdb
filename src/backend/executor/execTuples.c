@@ -225,7 +225,17 @@ ExecResetTupleTable(List *tupleTable,	/* tuple table */
 
 		/* If shouldFree, release memory occupied by the slot itself */
 		if (shouldFree)
+		{
+#ifdef USE_ASSERT_CHECKING
+			/*
+			 * Mark the tuple as having been freed before pfree it. So
+			 * we can be aware of error if we try to access the tuple
+			 * later by a dangling pointer.
+			 */
+			TupSetMemFreed(slot);
+#endif
 			pfree(slot);
+		}
 	}
 
 	/* If shouldFree, release the list structure */

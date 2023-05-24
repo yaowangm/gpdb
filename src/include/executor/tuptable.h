@@ -119,6 +119,13 @@
 #define         TTS_SHOULDFREE 	2
 #define         TTS_SHOULDFREE_MEM 	4	/* should pfree tts_memtuple? */
 #define         TTS_VIRTUAL     8
+/*
+ * The flag indicates the tuple has been freed in memory. We should never
+ * see this.
+ * Once we see the flag, it means we are trying to access a tuple which
+ * has been freed, and must hit a serious error.
+ */
+#define         TTS_MEM_FREED	16
 
 typedef struct TupleTableSlot
 {
@@ -154,8 +161,17 @@ typedef struct TupleTableSlot
 
 #ifndef FRONTEND
 
+static inline void TupSetMemFreed(TupleTableSlot *slot)
+{
+	slot->PRIVATE_tts_flags |= TTS_MEM_FREED;
+}
+static inline bool TupIsMemFreed(TupleTableSlot *slot)
+{
+	return slot->PRIVATE_tts_flags & TTS_MEM_FREED;
+}
 static inline bool TupIsNull(TupleTableSlot *slot)
 {
+	Assert(slot == NULL || !TupIsMemFreed(slot));
 	return (slot == NULL || (slot->PRIVATE_tts_flags & TTS_ISEMPTY) != 0);
 }
 static inline void TupClearIsEmpty(TupleTableSlot *slot)
@@ -164,7 +180,7 @@ static inline void TupClearIsEmpty(TupleTableSlot *slot)
 }
 static inline bool TupShouldFree(TupleTableSlot *slot)
 {
-	Assert(slot);
+	Assert(slot && !TupIsMemFreed(slot));
 	return ((slot->PRIVATE_tts_flags & TTS_SHOULDFREE) != 0); 
 }
 static inline void TupSetShouldFree(TupleTableSlot *slot)
@@ -177,17 +193,17 @@ static inline void TupClearShouldFree(TupleTableSlot *slot)
 }
 static inline bool TupHasHeapTuple(TupleTableSlot *slot)
 {
-	Assert(slot);
+	Assert(slot && !TupIsMemFreed(slot));
 	return slot->PRIVATE_tts_heaptuple != NULL;
 }
 static inline bool TupHasMemTuple(TupleTableSlot *slot)
 {
-	Assert(slot);
+	Assert(slot && !TupIsMemFreed(slot));
 	return slot->PRIVATE_tts_memtuple != NULL;
 }
 static inline bool TupHasVirtualTuple(TupleTableSlot *slot)
 {
-	Assert(slot);
+	Assert(slot && !TupIsMemFreed(slot));
     return (slot->PRIVATE_tts_flags & TTS_VIRTUAL) ? true : false;
 }
 static inline HeapTuple TupGetHeapTuple(TupleTableSlot *slot)

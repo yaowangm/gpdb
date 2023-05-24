@@ -600,6 +600,36 @@ EXPLAIN SELECT count(*) FROM gist_tbl, gist_tbl2
  WHERE gist_tbl.p <@ gist_tbl2.p;
 
 -- ----------------------------------------------------------------------
+-- Test: test15_dangling_pointer.sql
+-- ----------------------------------------------------------------------
+
+-- ----------------------------------------------------------------------------
+-- PURPOSE:
+--     This tests if we will hit any dangling pointer in dynamic index scan.
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE rank (id int, rank int, year int, gender
+        char(1), count int)
+DISTRIBUTED BY (id)
+PARTITION BY RANGE (year)
+( START (2006) END (2016) EVERY (1),
+          DEFAULT PARTITION extra );
+
+insert into rank
+select i, i, 2005+i%10, 'g', i
+from generate_series(1, 100)i;
+
+create index idx_year on rank(year);
+create index idx_rank on rank(rank);
+analyze rank;
+
+set optimizer_enable_dynamictablescan = off;
+set optimizer_enable_bitmapscan = off;
+
+explain select count(1) from rank where year < 2008 and rank < 50;
+select count(1) from rank where year < 2008 and rank < 50;
+
+-- ----------------------------------------------------------------------
 -- Test: teardown.sql
 -- ----------------------------------------------------------------------
 

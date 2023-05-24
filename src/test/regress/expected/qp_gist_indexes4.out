@@ -897,6 +897,57 @@ EXPLAIN SELECT count(*) FROM gist_tbl, gist_tbl2
 (11 rows)
 
 -- ----------------------------------------------------------------------
+-- Test: test15_dangling_pointer.sql
+-- ----------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+-- PURPOSE:
+--     This tests if we will hit any dangling pointer in dynamic index scan.
+-- ----------------------------------------------------------------------------
+CREATE TABLE rank (id int, rank int, year int, gender
+        char(1), count int)
+DISTRIBUTED BY (id)
+PARTITION BY RANGE (year)
+( START (2006) END (2016) EVERY (1),
+          DEFAULT PARTITION extra );
+insert into rank
+select i, i, 2005+i%10, 'g', i
+from generate_series(1, 100)i;
+create index idx_year on rank(year);
+create index idx_rank on rank(rank);
+analyze rank;
+set optimizer_enable_dynamictablescan = off;
+set optimizer_enable_bitmapscan = off;
+explain select count(1) from rank where year < 2008 and rank < 50;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=909.84..909.85 rows=1 width=8)
+   ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=909.78..909.83 rows=1 width=8)
+         ->  Aggregate  (cost=909.78..909.79 rows=1 width=8)
+               ->  Append  (cost=300.17..909.74 rows=6 width=0)
+                     ->  Bitmap Heap Scan on rank_1_prt_extra  (cost=300.17..303.23 rows=2 width=0)
+                           Recheck Cond: (rank < 50) 
+                           Filter: (year < 2008)
+                           ->  Bitmap Index Scan on rank_1_prt_extra_rank_idx  (cost=0.00..300.16 rows=2 width=0)                                 Index Cond: (rank < 50)
+                     ->  Bitmap Heap Scan on rank_1_prt_2  (cost=300.17..303.26 rows=2 width=0)
+                           Recheck Cond: (rank < 50)
+                           Filter: (year < 2008)
+                           ->  Bitmap Index Scan on rank_1_prt_2_rank_idx  (cost=0.00..300.17 rows=2 width=0)
+                                 Index Cond: (rank < 50)
+                     ->  Bitmap Heap Scan on rank_1_prt_3  (cost=300.17..303.25 rows=2 width=0)
+                           Recheck Cond: (rank < 50)
+                           Filter: (year < 2008)
+                           ->  Bitmap Index Scan on rank_1_prt_3_rank_idx  (cost=0.00..300.17 rows=2 width=0)
+                                 Index Cond: (rank < 50)
+ Optimizer: Postgres query optimizer 
+(20 rows)
+
+select count(1) from rank where year < 2008 and rank < 50;
+ count 
+-------
+    14
+(1 row)
+
+-- ----------------------------------------------------------------------
 -- Test: teardown.sql
 -- ----------------------------------------------------------------------
 -- start_ignore
