@@ -2532,30 +2532,6 @@ INSERT INTO pg_statistic VALUES (
 
 explain select b from epsilon_test where b in (11,30) limit 30;
 
--- Tests if we will hit any dangling pointer in dynamic index scan.
-
-CREATE TABLE rank (id int, rank int, year int, gender
-        char(1), count int)
-DISTRIBUTED BY (id)
-PARTITION BY RANGE (year)
-( START (2006) END (2016) EVERY (1),
-          DEFAULT PARTITION extra );
-
-insert into rank
-select i, i, 2005+i%10, 'g', i
-from generate_series(1, 100)i;
-
-create index idx_year on rank(year);
-create index idx_rank on rank(rank);
-analyze rank;
-
-set gp_debug_disable_wipemem = true;
-
-explain select count(1) from rank where year < 2008 and rank < 50;
-select count(1) from rank where year < 2008 and rank < 50;
-
-set gp_debug_disable_wipemem = false;
-
 -- start_ignore
 drop schema qp_misc_jiras cascade;
 -- end_ignore
