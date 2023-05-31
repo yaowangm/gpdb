@@ -694,16 +694,6 @@ extern bool	gp_explain_jit;
  */
 extern int  gp_debug_linger;
 
-#ifdef USE_ASSERT_CHECKING
-/*
- * gp_debug_disable_wipemem (bool)
- *
- * gp_debug_disable_wipemem will diable wipe_mem() to reset freed memory
- * to 0x7F, which is useful for debugging sometime.
- */
-extern bool	gp_debug_disable_wipemem;
-#endif
-
 /* --------------------------------------------------------------------------------------------------
  * Non-GUC globals
  */

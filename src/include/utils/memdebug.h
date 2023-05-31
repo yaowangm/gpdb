@@ -17,8 +17,6 @@
 #ifndef MEMDEBUG_H
 #define MEMDEBUG_H
 
-#include "cdb/cdbvars.h"
-
 #ifdef USE_VALGRIND
 #include <valgrind/memcheck.h>
 #else
@@ -40,11 +38,6 @@
 static inline void
 wipe_mem(void *ptr, size_t size)
 {
-#ifdef USE_ASSERT_CHECKING
-	if (gp_debug_disable_wipemem)
-		return;
-#endif
-
 	VALGRIND_MAKE_MEM_UNDEFINED(ptr, size);
 	memset(ptr, 0x7F, size);
 	VALGRIND_MAKE_MEM_NOACCESS(ptr, size);
