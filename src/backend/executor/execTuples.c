@@ -1229,14 +1229,6 @@ ExecResetTupleTable(List *tupleTable,	/* tuple table */
 				if (slot->tts_isnull)
 					pfree(slot->tts_isnull);
 			}
-#ifdef USE_ASSERT_CHECKING
-			/*
-			 * Mark the tuple as having been freed before pfree it. So
-			 * we can be aware of error if we try to access the tuple
-			 * later by a dangling pointer.
-			 */
-			slot->tts_flags |= TTS_FLAG_MEMFREED;
-#endif
 			pfree(slot);
 		}
 	}

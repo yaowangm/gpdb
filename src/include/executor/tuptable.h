@@ -94,44 +94,19 @@
 
 /* true = slot is empty */
 #define			TTS_FLAG_EMPTY			(1 << 1)
-#ifdef USE_ASSERT_CHECKING
-#define TTS_EMPTY(slot) (tts_is_empty(slot))
-#else
-#define TTS_EMPTY(slot) (((slot)->tts_flags & TTS_FLAG_EMPTY) != 0)
-#endif
+#define TTS_EMPTY(slot)	(((slot)->tts_flags & TTS_FLAG_EMPTY) != 0)
 
 /* should pfree tuple "owned" by the slot? */
 #define			TTS_FLAG_SHOULDFREE		(1 << 2)
-#ifdef USE_ASSERT_CHECKING
-#define TTS_SHOULDFREE(slot) (tts_is_shouldfree(slot))
-#else
 #define TTS_SHOULDFREE(slot) (((slot)->tts_flags & TTS_FLAG_SHOULDFREE) != 0)
-#endif
 
 /* saved state for slot_deform_heap_tuple */
 #define			TTS_FLAG_SLOW		(1 << 3)
-#ifdef USE_ASSERT_CHECKING
-#define TTS_SLOW(slot) (tts_is_slow(slot))
-#else
 #define TTS_SLOW(slot) (((slot)->tts_flags & TTS_FLAG_SLOW) != 0)
-#endif
 
 /* fixed tuple descriptor */
 #define			TTS_FLAG_FIXED		(1 << 4)
-#ifdef USE_ASSERT_CHECKING
-#define TTS_FIXED(slot) (tts_is_fixed(slot))
-#else
 #define TTS_FIXED(slot) (((slot)->tts_flags & TTS_FLAG_FIXED) != 0)
-#endif
-
-/*
- * The flag indicates the tuple has been freed in memory. We should never
- * see this.
- * Once we see the flag, it means we are trying to access a tuple which
- * has been freed, and must hit a serious error.
- */
-#define			TTS_FLAG_MEMFREED	(1 << 5)
-#define TTS_MEMFREED(slot) (((slot)->tts_flags & TTS_FLAG_MEMFREED) != 0)
 
 struct TupleTableSlotOps;
 typedef struct TupleTableSlotOps TupleTableSlotOps;
@@ -356,34 +331,6 @@ extern void slot_getsomeattrs_int(TupleTableSlot *slot, int attnum);
 
 extern MemTuple appendonly_form_memtuple(TupleTableSlot *slot, MemTupleBinding *mt_bind);
 extern void appendonly_free_memtuple(MemTuple tuple);
-
-#ifdef USE_ASSERT_CHECKING
-
-static inline bool tts_is_empty(TupleTableSlot *slot)
-{
-	Assert(!TTS_MEMFREED(slot));
-	return (((slot)->tts_flags & TTS_FLAG_EMPTY) != 0);
-}
-
-static inline bool tts_is_shouldfree(TupleTableSlot *slot)
-{
-	Assert(!TTS_MEMFREED(slot));
-	return (((slot)->tts_flags & TTS_FLAG_SHOULDFREE) != 0);
-}
-
-static inline bool tts_is_slow(TupleTableSlot *slot)
-{
-	Assert(!TTS_MEMFREED(slot));
-	return (((slot)->tts_flags & TTS_FLAG_SLOW) != 0);
-}
-
-static inline bool tts_is_fixed(TupleTableSlot *slot)
-{
-	Assert(!TTS_MEMFREED(slot));
-	return (((slot)->tts_flags & TTS_FLAG_FIXED) != 0);
-}
-
-#endif
 
 #ifndef FRONTEND
 
