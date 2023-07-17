@@ -2085,30 +2085,42 @@ transformDistributedBy(CreateStmtContext *cxt,
 
 		if (distrkeys)
 		{
-			foreach(cell, index_stmt->indexParams)
-			{
-				IndexElem *iparam = lfirst(cell);
-				ListCell *dkcell;
+			ListCell *dkcell;
 
-				/*
-				 * The index element could be either a column name or an expression.
-				 * If the index element is not a column name, it should be skipped
-				 * to compute the most common columns. For example,
-				 *
-				 *   create table t(i int, j int, k int) distributed by (i,j);
-				 *   create unique index on t(i, func1(j));
-				 *
-				 * The first index element is a name, the second index element
-				 * is an expression. The set of distribution keys is not a subset
-				 * of the column names in the index, so it violates the
-				 * compatibility and finally it fails.
-				 * But `create unique index on t(i, j);` will success.
-				 */
-				if (!iparam || !iparam->name)
-					continue;
-				foreach(dkcell, distrkeys)
+			/*
+			 * Note: when unique index has the same columns to dist keys, but with
+			 * different order, the new dist keys should have the same order to dist
+			 * keys. e.g.:
+			 *   dist keys:    (a, b, c)
+			 *   unique index: (a, c, b)
+			 * The new dist keys should be: (a, b, c)
+			 * So, we go through dist keys in outer loop.
+			 */
+			foreach(dkcell, distrkeys)
+			{
+				IndexElem  *dk = (IndexElem *) lfirst(dkcell);
+
+				foreach(cell, index_stmt->indexParams)
 				{
-					IndexElem  *dk = (IndexElem *) lfirst(dkcell);
+					IndexElem *iparam = lfirst(cell);
+
+					/*
+					 * The index element could be either a column name or an expression.
+					 * If the index element is not a column name, it should be skipped
+					 * to compute the most common columns. For example,
+					 *
+					 *   create table t(i int, j int, k int) distributed by (i,j);
+					 *   create unique index on t(i, func1(j));
+					 *
+					 * The first index element is a name, the second index element
+					 * is an expression. The set of distribution keys is not a subset
+					 * of the column names in the index, so it violates the
+					 * compatibility and finally it fails.
+					 * But `create unique index on t(i, j);` will success.
+					 */
+					if (!iparam || !iparam->name)
+						continue;
+
 					if (strcmp(dk->name, iparam->name) == 0)
 					{
 						new_distrkeys = lappend(new_distrkeys, dk);
