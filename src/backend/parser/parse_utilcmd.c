@@ -423,8 +423,11 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString, bool createPartit
 	/*
 	 * Transform DISTRIBUTED BY (or constuct a default one, if not given
 	 *  explicitly). Not for foreign tables, though.
+	 * If it is to add a part to a partition table, the new partition must
+	 * has exact same distribution keys to root partition. So the transformation
+	 * is unnecessary.
 	 */
-	if (stmt->relKind == RELKIND_RELATION)
+	if (stmt->relKind == RELKIND_RELATION && !stmt->is_add_part)
 	{
 		int			numsegments = -1;
 
@@ -465,6 +468,13 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString, bool createPartit
 		if (stmt->is_part_child)
 			stmt->distributedBy->numsegments = numsegments;
 	}
+
+	/*
+	 * If it is to add a part to a partition table, the DistributedBy info
+	 * must have been given.
+	 */
+	AssertImply(stmt->is_add_part,
+				stmt->distributedBy != NULL);
 
 	if (stmt->partitionBy != NULL &&
 		stmt->distributedBy &&
@@ -2085,42 +2095,30 @@ transformDistributedBy(CreateStmtContext *cxt,
 
 		if (distrkeys)
 		{
-			ListCell *dkcell;
-
-			/*
-			 * Note: when unique index has the same columns to dist keys, but with
-			 * different order, the new dist keys should have the same order to dist
-			 * keys. e.g.:
-			 *   dist keys:    (a, b, c)
-			 *   unique index: (a, c, b)
-			 * The new dist keys should be: (a, b, c)
-			 * So, we go through dist keys in outer loop.
-			 */
-			foreach(dkcell, distrkeys)
+			foreach(cell, index_stmt->indexParams)
 			{
-				IndexElem  *dk = (IndexElem *) lfirst(dkcell);
+				IndexElem *iparam = lfirst(cell);
+				ListCell *dkcell;
 
-				foreach(cell, index_stmt->indexParams)
+				/*
+				 * The index element could be either a column name or an expression.
+				 * If the index element is not a column name, it should be skipped
+				 * to compute the most common columns. For example,
+				 *
+				 *   create table t(i int, j int, k int) distributed by (i,j);
+				 *   create unique index on t(i, func1(j));
+				 *
+				 * The first index element is a name, the second index element
+				 * is an expression. The set of distribution keys is not a subset
+				 * of the column names in the index, so it violates the
+				 * compatibility and finally it fails.
+				 * But `create unique index on t(i, j);` will success.
+				 */
+				if (!iparam || !iparam->name)
+					continue;
+				foreach(dkcell, distrkeys)
 				{
-					IndexElem *iparam = lfirst(cell);
-
-					/*
-					 * The index element could be either a column name or an expression.
-					 * If the index element is not a column name, it should be skipped
-					 * to compute the most common columns. For example,
-					 *
-					 *   create table t(i int, j int, k int) distributed by (i,j);
-					 *   create unique index on t(i, func1(j));
-					 *
-					 * The first index element is a name, the second index element
-					 * is an expression. The set of distribution keys is not a subset
-					 * of the column names in the index, so it violates the
-					 * compatibility and finally it fails.
-					 * But `create unique index on t(i, j);` will success.
-					 */
-					if (!iparam || !iparam->name)
-						continue;
-
+					IndexElem  *dk = (IndexElem *) lfirst(dkcell);
 					if (strcmp(dk->name, iparam->name) == 0)
 					{
 						new_distrkeys = lappend(new_distrkeys, dk);
