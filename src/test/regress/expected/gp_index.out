@@ -155,6 +155,42 @@ Check constraints:
 Inherits: foo1
 Distributed by: (a, b, c)
 
+-- alter table by split partition
+alter table public.foo1 split partition p1 at(500) into (partition p1_0, partition p1_1);
+NOTICE:  exchanged partition "p1" of relation "foo1" with relation "pg_temp_17592"
+NOTICE:  dropped partition "p1" for relation "foo1"
+NOTICE:  CREATE TABLE will create partition "foo1_1_prt_p1_0" for table "foo1"
+NOTICE:  CREATE TABLE will create partition "foo1_1_prt_p1_1" for table "foo1"
+-- check the status of the split partitions: new dist keys should be consistent
+-- to the parent table
+\d+ foo1_1_prt_p1_0
+                   Table "public.foo1_1_prt_p1_0"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Indexes:
+    "foo1_1_prt_p1_0_a_c_b_idx" UNIQUE, btree (a, c, b)
+Check constraints:
+    "foo1_1_prt_p1_0_check" CHECK (a >= 1 AND a < 500)
+Inherits: foo1
+Distributed by: (a, b, c)
+
+\d+ foo1_1_prt_p1_1
+                   Table "public.foo1_1_prt_p1_1"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+ c      | integer |           | plain   |              | 
+Indexes:
+    "foo1_1_prt_p1_1_a_c_b_idx" UNIQUE, btree (a, c, b)
+Check constraints:
+    "foo1_1_prt_p1_1_check" CHECK (a >= 500 AND a <= 10000)
+Inherits: foo1
+Distributed by: (a, b, c)
+
 DROP TABLE foo1;
 -- before dispatch stmt to QEs, switching user to login user,
 -- so that the connection to QEs use the same user as the connection to QD.

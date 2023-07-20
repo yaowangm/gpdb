@@ -78,6 +78,14 @@ alter table public.foo1 add partition p4 START (1000001) END (2000000) INCLUSIVE
 -- to the parent table
 \d+ foo1_1_prt_p4
 
+-- alter table by split partition
+alter table public.foo1 split partition p1 at(500) into (partition p1_0, partition p1_1);
+
+-- check the status of the split partitions: new dist keys should be consistent
+-- to the parent table
+\d+ foo1_1_prt_p1_0
+\d+ foo1_1_prt_p1_1
+
 DROP TABLE foo1;
 
 -- before dispatch stmt to QEs, switching user to login user,
