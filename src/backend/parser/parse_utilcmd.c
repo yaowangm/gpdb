@@ -426,6 +426,9 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString, bool createPartit
 	 * If it is to add a part to a partition table, the new partition must
 	 * has exact same distribution keys to root partition. So the transformation
 	 * is unnecessary.
+	 * Note: when we perform "split partition", we actually perform "add
+	 * partition" multiple times to create new partitions, and is_split_part
+	 * is never set. So we don't need to care about is_split_part here.
 	 */
 	if (stmt->relKind == RELKIND_RELATION && !stmt->is_add_part)
 	{
