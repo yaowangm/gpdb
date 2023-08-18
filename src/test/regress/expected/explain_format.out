@@ -21,6 +21,8 @@
 -- s/Memory used:  \d+\w?B/Memory used: ###B/
 -- m/Memory Usage: \d+\w?B/
 -- s/Memory Usage: \d+\w?B/Memory Usage: ###B/
+-- m/Memory wanted:  \d+\w?kB/
+-- s/Memory wanted:  \d+\w?kB/Memory wanted: ###kB/
 -- m/Peak Memory Usage: \d+/
 -- s/Peak Memory Usage: \d+/Peak Memory Usage: ###/
 -- m/Buckets: \d+/

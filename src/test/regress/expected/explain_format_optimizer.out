@@ -21,6 +21,8 @@
 -- s/Memory used:  \d+\w?B/Memory used: ###B/
 -- m/Memory Usage: \d+\w?B/
 -- s/Memory Usage: \d+\w?B/Memory Usage: ###B/
+-- m/Memory wanted:  \d+\w?kB/
+-- s/Memory wanted:  \d+\w?kB/Memory wanted: ###kB/
 -- m/Peak Memory Usage: \d+/
 -- s/Peak Memory Usage: \d+/Peak Memory Usage: ###/
 -- m/Buckets: \d+/
@@ -864,16 +866,13 @@ Gather Motion 3:1  (slice1; segments: 3) (actual time=66.084..124.823 rows=20000
         ->  Shared Scan (share slice:id 1:0) (actual time=10.481..17.729 rows=16930 loops=1)
               ->  Seq Scan on test_src_tbl (actual time=0.020..1.319 rows=16930 loops=1)
         ->  Append (actual time=45.590..84.119 rows=6771 loops=1)
-              ->  Finalize HashAggregate (actual time=45.590..61.530 rows=3385 loops=1)
+              ->  HashAggregate (actual time=14.125..27.481 rows=3385 loops=1)
                     Group Key: share0_ref2.b
                     Extra Text: (seg0)   hash table(s): 1; 3368 groups total in 20 batches, 60280 spill partitions; disk usage: 2016KB; chain length 1.9 avg, 3 max; using 3368 of 43008 buckets; total 0 expansions.
 
                     ->  Redistribute Motion 3:3  (slice2; segments: 3) (actual time=0.023..38.616 rows=16925 loops=1)
                           Hash Key: share0_ref2.b
-                          ->  Streaming Partial HashAggregate (actual time=10.905..33.798 rows=16930 loops=1)
-                                Group Key: share0_ref2.b
-                                Extra Text: (seg1)   hash table(s): 1; chain length 2.0 avg, 4 max; using 16930 of 98304 buckets; total 0 expansions.
-
+                          ->  Result (actual time=7.251..15.668 rows=16930 loops=1)
                                 ->  Shared Scan (share slice:id 2:0) (actual time=10.668..14.900 rows=16930 loops=1)
               ->  HashAggregate (actual time=11.722..22.117 rows=3386 loops=1)
                     Group Key: share0_ref3.a
@@ -884,11 +883,11 @@ Optimizer: Pivotal Optimizer (GPORCA)
 Planning Time: 11.209 ms
   (slice0)    Executor memory: 224K bytes.
 * (slice1)    Executor memory: 574K bytes avg x 3 workers, 576K bytes max (seg2).  Work_mem: 353K bytes max, 1137K bytes wanted.
-* (slice2)    Executor memory: 161K bytes avg x 3 workers, 161K bytes max (seg0).  Work_mem: 193K bytes max, 9155K bytes wanted.
+  (slice2)    Executor memory: 161K bytes avg x 3 workers, 161K bytes max (seg0).
 Memory used:  1000kB
-Memory wanted:  55430kB
+Memory wanted:  6600kB
 Execution Time: 126.275 ms
-(29 rows)
+(26 rows)
 RESET optimizer_enable_hashagg;
 RESET statement_mem;
 -- Cleanup
