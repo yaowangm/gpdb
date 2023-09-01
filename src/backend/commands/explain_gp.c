@@ -1124,7 +1124,7 @@ cdbexplain_depositStatsToNode(PlanState *planstate, CdbExplain_RecvStatCtx *ctx)
 		 * from all of the nodes in the slice.  But only if that worker stands
 		 * out more than 5% above the average.
 		 */
-		if (peakmemused.agg.vmax > 1.05 * cdbexplain_agg_avg(&peakmemused.agg))
+		//if (peakmemused.agg.vmax > 1.01 * cdbexplain_agg_avg(&peakmemused.agg))
 			cdbexplain_depStatAcc_saveText(&peakmemused, ctx->extratextbuf, &saved);
 
 		/*
