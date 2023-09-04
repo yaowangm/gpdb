@@ -243,7 +243,7 @@ WITH query_plan (et) AS
     'SELECT a, COUNT(DISTINCT b) AS b FROM test_src_tbl GROUP BY a',
     false)
 )
-SELECT BTRIM(et) as epln_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
+SELECT BTRIM(et) as explain_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
 
 -- Hashagg with grouping sets
 CREATE TABLE test_hashagg_groupingsets AS

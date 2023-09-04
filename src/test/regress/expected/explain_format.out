@@ -926,8 +926,8 @@ WITH query_plan (et) AS
     'SELECT a, COUNT(DISTINCT b) AS b FROM test_src_tbl GROUP BY a',
     false)
 )
-SELECT BTRIM(et) as epln_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
-epln_info
+SELECT BTRIM(et) as explain_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
+explain_info
 Extra Text: (seg0)   hash table(s): 1; 3368 groups total in 4 batches, 2576 spill partitions; disk usage: 800KB; chain length 2.9 avg, 9 max; using 3368 of 20480 buckets; total 0 expansions.
 Extra Text: (seg0)   hash table(s): 1; chain length 2.3 avg, 5 max; using 3368 of 8192 buckets; total 1 expansions.
 (2 rows)
