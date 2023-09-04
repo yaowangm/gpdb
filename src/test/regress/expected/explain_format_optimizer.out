@@ -856,8 +856,8 @@ WITH query_plan (et) AS
     'SELECT a, avg(b) AS b FROM test_src_tbl GROUP BY grouping sets ((a), (b))',
     false)
 )
-SELECT BTRIM(et) as epln_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
-epln_info
+SELECT BTRIM(et) as explain_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
+explain_info
 Extra Text: (seg0)   hash table(s): 1; 3368 groups total in 8 batches, 53148 spill partitions; disk usage: 1152KB; chain length 2.2 avg, 5 max; using 3368 of 18432 buckets; total 0 expansions.
 Extra Text: (seg1)   hash table(s): 1; 3385 groups total in 8 batches, 53488 spill partitions; disk usage: 1152KB; chain length 2.1 avg, 4 max; using 3385 of 18432 buckets; total 0 expansions.
 (2 rows)

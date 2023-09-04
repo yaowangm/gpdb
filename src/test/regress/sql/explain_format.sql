@@ -255,7 +255,7 @@ WITH query_plan (et) AS
     'SELECT a, avg(b) AS b FROM test_src_tbl GROUP BY grouping sets ((a), (b))',
     false)
 )
-SELECT BTRIM(et) as epln_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
+SELECT BTRIM(et) as explain_info FROM query_plan WHERE et like '%Extra Text%' limit 2;
 
 RESET optimizer_enable_hashagg;
 RESET statement_mem;
