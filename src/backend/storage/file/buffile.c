@@ -1122,9 +1122,17 @@ BufFileDumpCompressedBuffer(BufFile *file, const void *buffer, Size nbytes)
 	/*
 	 * Calculate the delta of buffer used by ZSTD stream and take it into
 	 * account to work_set->comp_buf_total.
+	 * On GPDB 7X, we call ZSTD API ZSTD_sizeof_CStream() to get the buffer
+	 * size. However, the API is unavaliable on 6X (marked as
+	 * ZSTD_STATIC_LINKING_ONLY) due to different version of ZSTD lib.
+	 * After some experiments, it's proved that the compression buffer size
+	 * per file is pretty stable (about 1.3MB) regard of the temp file size,
+	 * so we simply use the hard-coded value here.
+	 * We may use the API ZSTD_sizeof_CStream() in future if the ZSTD lib
+	 * version is updated on 6X.
 	 */
 
-	compressed_buffer_size = ZSTD_sizeof_CStream(file->zstd_context->cctx);
+	compressed_buffer_size = 1.3 * 1024 * 1024;
 
 	/*
 	 * As ZSTD comments said, the memory usage can evolve (increase or
