@@ -1007,6 +1007,8 @@ BufFilePledgeSequential(BufFile *buffile)
 	if (buffile->maxoffset != 0)
 		elog(ERROR, "cannot pledge sequential access to a temporary file after writing it");
 
+	AssertImply(work_set->compression_buf_total > 0, gp_workfile_compression);
+
 	/*
 	 * If gp_workfile_compression_overhead_limit is 0, it means no limit for
 	 * memory used by compressed work files. Othersize, compress the work file
