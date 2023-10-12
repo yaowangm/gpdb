@@ -137,7 +137,7 @@ set gp_workfile_compression=on;
 set gp_workfile_limit_files_per_query=0;
 
 -- Run the query with a large value of gp_workfile_compression_overhead_limit
--- The compressed file number should be at least 7
+-- The compressed file number should be equal to total work file number
 
 set gp_workfile_compression_overhead_limit=2048000;
 
@@ -157,7 +157,7 @@ inner join  F on A.a::text = F.a ;',
 false) limit 6;
 
 -- Run the query with a smaller value of gp_workfile_compression_overhead_limit
--- The compressed file number should be no more than 4
+-- The compressed file number should be less than total work file number
 
 set gp_workfile_compression_overhead_limit=5000;
 
@@ -178,7 +178,7 @@ true) limit 6;
 
 -- Run the query with gp_workfile_compression_overhead_limit=0, which means
 -- no limit
--- The compressed file number should be at least 7
+-- The compressed file number should be equal to total work file number
 
 set gp_workfile_compression_overhead_limit=0;
 
