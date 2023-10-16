@@ -92,7 +92,7 @@ typedef struct workfile_set
 	uint64		avg_file_size;
 
 	/* Not used, just to for ABI compatibility */
-	uint64		min_file_size;
+	uint64		abi_reserved;
 
 	/* Total memory usage by compression buffer */
 	uint64		compression_buf_total;
