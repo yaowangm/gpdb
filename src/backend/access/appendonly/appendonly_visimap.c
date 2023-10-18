@@ -24,6 +24,49 @@
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 
+/* 
+ * RANGE_COUNT (aka nranges): how many ranges needed for rownum
+ *
+ * nranges = rownum / APPENDONLY_VISIMAP_MAX_RANGE + 1
+ */
+#define AOVISIMAP_ALLVISIBLESET_RANGE_COUNT(rownum) \
+	((int)(((rownum) >> AOVISIMAP_ALLVISIBLESET_SHIFT) + 1))
+
+/*
+ * BMS_COUNT (aka nbms): how many bitmapsets needed for nranges
+ *
+ * nbms = (nranges - 1) / APPENDONLY_VISIMAP_MAX_RANGE + 1
+ */
+#define AOVISIMAP_ALLVISIBLESET_BMS_COUNT(nranges) \
+	((((nranges) - 1) >> AOVISIMAP_ALLVISIBLESET_SHIFT) + 1)
+
+/*
+ * Calculates rangenum and get bitmapset corresponding to the given tuple id.
+ *
+ * Input: allvisibleset, aotid
+ * Output: bmspp: the last bitmapset pointer address
+ * 		   rangenum: the relative range index in the last bitmapset of the rownum
+ *  	   rangenum = nranges % APPENDONLY_VISIMAP_MAX_RANGE - 1
+ * 					= nranges - (nbms - 1) * APPENDONLY_VISIMAP_MAX_RANGE - 1
+ */
+#define CALCULATE_BMS_AND_RANGENUM(allvisibleset, aotid, bmspp, rangenum) \
+do { \
+    int segnum = AOTupleIdGet_segmentFileNum(aotid); \
+    uint64 rownum = AOTupleIdGet_rowNum(aotid); \
+    int nranges = AOVISIMAP_ALLVISIBLESET_RANGE_COUNT(rownum); \
+	int nbms = AOVISIMAP_ALLVISIBLESET_BMS_COUNT(nranges); \
+    rangenum = nranges - ((nbms - 1) << AOVISIMAP_ALLVISIBLESET_SHIFT) - 1; \
+	Assert(nranges <= AOVISIMAP_ALLVISIBLESET_MAX_RANGE_COUNT); \
+	Assert(nbms <= AOVISIMAP_ALLVISIBLESET_MAX_BMS_COUNT); \
+	Assert(rangenum == (nranges - 1) % APPENDONLY_VISIMAP_MAX_RANGE); \
+	Assert((allvisibleset) != NULL); \
+    (bmspp) = &((allvisibleset)->bitmapsets[segnum][nbms - 1]); \
+	elogif(Debug_appendonly_print_visimap, LOG, \
+		   "Append-only visimap allvisibleset: " \
+		   "(segnum %d, rownum %lu, nranges %d, nbms %d, rangenum %d)", \
+		   segnum, rownum, nranges, nbms, rangenum); \
+} while (0)
+
 /*
  * Key structure for the visimap deletion hash table.
  */
@@ -71,13 +114,78 @@ typedef struct AppendOnlyVisiMapDeleteData
 } AppendOnlyVisiMapDeleteData;
 
 
-
 static void AppendOnlyVisimap_Store(
 						AppendOnlyVisimap *visiMap);
 
 static void AppendOnlyVisimap_Find(
 					   AppendOnlyVisimap *visiMap,
 					   AOTupleId *tupleId);
+
+/*
+ * Initializes the allvisibleset data structure.
+ */
+static void
+AppendOnlyVisimapAllVisibleSet_Init(
+									AppendOnlyVisimapAllVisibleSet *allvisibleset,
+									MemoryContext mctx)
+{
+	memset(allvisibleset, 0, sizeof(AppendOnlyVisimapAllVisibleSet));
+
+	allvisibleset->mctx = mctx;
+}
+
+/*
+ * Finishes using allvisibleset and freed all bitmapsets.
+ */
+static void
+AppendOnlyVisimapAllVisibleSet_Finish(
+						AppendOnlyVisimapAllVisibleSet *allvisibleset)
+{
+	Assert(allvisibleset != NULL);
+
+	for (int i = 0; i < AOTupleId_MultiplierSegmentFileNum; i++)
+	{
+		for (int j = 0; j < AOVISIMAP_ALLVISIBLESET_MAX_BMS_COUNT; j++)
+		{
+			bms_free(allvisibleset->bitmapsets[i][j]);
+			allvisibleset->bitmapsets[i][j] = NULL;
+		}
+	}
+}
+
+/*
+ * Checks whether allvisibleset covers the given tuple id or not.
+ */
+static inline bool
+AppendOnlyVisimapAllVisibleSet_CoversTuple(
+										   AppendOnlyVisimapAllVisibleSet *allvisibleset,
+										   AOTupleId *aoTupleId)
+{
+	Bitmapset **bmspp;
+	int rangenum;
+
+	CALCULATE_BMS_AND_RANGENUM(allvisibleset, aoTupleId, bmspp, rangenum);
+
+	return bms_is_member(rangenum, *bmspp);
+}
+
+/*
+ * Adds the range corresponding to the given tuple id to the allvisibleset.
+ */
+static inline void
+AppendOnlyVisimapAllVisibleSet_AddTuple(
+										AppendOnlyVisimapAllVisibleSet *allvisibleset,
+										AOTupleId *aoTupleId)
+{
+	Bitmapset **bmspp;
+	int rangenum;
+
+	CALCULATE_BMS_AND_RANGENUM(allvisibleset, aoTupleId, bmspp, rangenum);
+
+	Assert(CurrentMemoryContext == allvisibleset->mctx);
+
+	*bmspp = bms_add_member(*bmspp, rangenum);
+}
 
 /*
  * Finishes the visimap operations.
@@ -96,6 +204,7 @@ AppendOnlyVisimap_Finish(
 
 	AppendOnlyVisimapStore_Finish(&visiMap->visimapStore, lockmode);
 	AppendOnlyVisimapEntry_Finish(&visiMap->visimapEntry);
+	AppendOnlyVisimapAllVisibleSet_Finish(&visiMap->allvisibleset);
 
 	MemoryContextDelete(visiMap->memoryContext);
 	visiMap->memoryContext = NULL;
@@ -137,6 +246,9 @@ AppendOnlyVisimap_Init(
 								lockmode,
 								appendOnlyMetaDataSnapshot,
 								visiMap->memoryContext);
+
+	AppendOnlyVisimapAllVisibleSet_Init(&visiMap->allvisibleset,
+										visiMap->memoryContext);
 
 	MemoryContextSwitchTo(oldContext);
 }
@@ -189,7 +301,8 @@ AppendOnlyVisimap_IsVisible(
 							AppendOnlyVisimap *visiMap,
 							AOTupleId *aoTupleId)
 {
-	int segNum, rowNum, rangeNum;
+	bool inAllVisible;
+	MemoryContext oldContext;
 
 	Assert(visiMap);
 
@@ -197,11 +310,9 @@ AppendOnlyVisimap_IsVisible(
 		   "Append-only visi map: Visibility check: "
 		   "(tupleId) = %s",
 		   AOTupleIdToString(aoTupleId));
-	rowNum = AOTupleIdGet_rowNum(aoTupleId);
-	segNum = AOTupleIdGet_segmentFileNum(aoTupleId);
-	rangeNum =  rowNum / APPENDONLY_VISIMAP_MAX_RANGE;
 
-	if (bms_is_member(rangeNum, visiMap->allvisible_bitmap[segNum]))
+	if (AppendOnlyVisimapAllVisibleSet_CoversTuple(&visiMap->allvisibleset,
+												   aoTupleId))
 		return true;
 
 	if (!AppendOnlyVisimapEntry_CoversTuple(&visiMap->visimapEntry,
@@ -217,9 +328,21 @@ AppendOnlyVisimap_IsVisible(
 	}
 
 	/* visimap entry is now positioned to cover the aoTupleId */
-	return AppendOnlyVisimapEntry_IsVisible(&visiMap->visimapEntry,
-											aoTupleId,
-											&visiMap->allvisible_bitmap[segNum]);
+	if (AppendOnlyVisimapEntry_IsVisible(&visiMap->visimapEntry,
+										 aoTupleId,
+										 &inAllVisible))
+	{
+		if (inAllVisible)
+		{
+			oldContext = MemoryContextSwitchTo(visiMap->memoryContext);
+			AppendOnlyVisimapAllVisibleSet_AddTuple(&visiMap->allvisibleset, aoTupleId);
+			MemoryContextSwitchTo(oldContext);
+		}
+
+		return true;
+	}
+
+	return false;
 }
 
 /*
