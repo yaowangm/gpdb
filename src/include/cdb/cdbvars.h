@@ -528,6 +528,16 @@ extern bool gp_enable_multiphase_agg;
 extern bool gp_enable_motion_deadlock_sanity;
 
 /*
+ * Enable/disable AO visimap allvisibleset caching.
+ *
+ * AllVisisbleSet works as a caching mechanism to avoid aovisimap sysscan for
+ * every tuple. As a memeber of AppendOnlyVisimap structure, it is a 2D-array
+ * storing Bitmapset pointers for caching ranges corresponding to all-visible
+ * visimap entries.
+ */
+extern bool gp_enable_aovisimap_allvisibleset;
+
+/*
  * Adjust selectivity for nulltests atop of outer joins;
  * Special casing prominent use case to work around lack of (NOT) IN subqueries
  */

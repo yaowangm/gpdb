@@ -475,7 +475,8 @@ AppendOnlyVisimapEntry_IsVisible(
 			   "Append-only visi map entry: All entries are visibile: "
 			   "(firstRowNum, rowNum) = (" INT64_FORMAT ", " INT64_FORMAT ")",
 			   visiMapEntry->firstRowNum, rowNum);
-		*inAllVisible = true;
+		*inAllVisible = gp_enable_aovisimap_allvisibleset;
+
 		return true;
 	}
 	Assert(rowNum >= visiMapEntry->firstRowNum);

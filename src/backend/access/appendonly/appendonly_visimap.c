@@ -204,7 +204,8 @@ AppendOnlyVisimap_Finish(
 
 	AppendOnlyVisimapStore_Finish(&visiMap->visimapStore, lockmode);
 	AppendOnlyVisimapEntry_Finish(&visiMap->visimapEntry);
-	AppendOnlyVisimapAllVisibleSet_Finish(&visiMap->allvisibleset);
+	if (gp_enable_aovisimap_allvisibleset)
+		AppendOnlyVisimapAllVisibleSet_Finish(&visiMap->allvisibleset);
 
 	MemoryContextDelete(visiMap->memoryContext);
 	visiMap->memoryContext = NULL;
@@ -247,8 +248,9 @@ AppendOnlyVisimap_Init(
 								appendOnlyMetaDataSnapshot,
 								visiMap->memoryContext);
 
-	AppendOnlyVisimapAllVisibleSet_Init(&visiMap->allvisibleset,
-										visiMap->memoryContext);
+	if (gp_enable_aovisimap_allvisibleset)
+		AppendOnlyVisimapAllVisibleSet_Init(&visiMap->allvisibleset,
+											visiMap->memoryContext);
 
 	MemoryContextSwitchTo(oldContext);
 }
@@ -311,7 +313,8 @@ AppendOnlyVisimap_IsVisible(
 		   "(tupleId) = %s",
 		   AOTupleIdToString(aoTupleId));
 
-	if (AppendOnlyVisimapAllVisibleSet_CoversTuple(&visiMap->allvisibleset,
+	if (gp_enable_aovisimap_allvisibleset &&
+		AppendOnlyVisimapAllVisibleSet_CoversTuple(&visiMap->allvisibleset,
 												   aoTupleId))
 		return true;
 

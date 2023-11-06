@@ -48,6 +48,7 @@
 		"gp_disable_tuple_hints",
 		"gp_enable_interconnect_aggressive_retry",
 		"gp_enable_segment_copy_checking",
+		"gp_enable_aovisimap_allvisibleset",
 		"gp_external_enable_filter_pushdown",
 		"gp_hashjoin_tuples_per_bucket",
 		"gp_ignore_error_table",

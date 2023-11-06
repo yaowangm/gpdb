@@ -3017,6 +3017,16 @@ struct config_bool ConfigureNamesBool_gp[] =
 		false,
 		NULL, NULL, NULL
 	},
+	{
+		{"gp_enable_aovisimap_allvisibleset", PGC_USERSET, UNGROUPED,
+		gettext_noop("Enable AO visimap allvisibleset caching."),
+		NULL,
+		GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
+		},
+		&gp_enable_aovisimap_allvisibleset,
+		true,
+		NULL, NULL, NULL
+	},
 
 	/* End-of-list marker */
 	{
