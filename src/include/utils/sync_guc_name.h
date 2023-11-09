@@ -25,6 +25,7 @@
 		"debug_appendonly_print_storage_headers",
 		"debug_appendonly_print_verify_write_block",
 		"debug_appendonly_print_visimap",
+		"debug_appendonly_print_visimap_allvisibleset",
 		"debug_appendonly_use_no_toast",
 		"default_table_access_method",
 		"default_tablespace",

@@ -280,6 +280,7 @@ extern bool Debug_appendonly_print_segfile_choice;
 extern bool test_AppendOnlyHash_eviction_vs_just_marking_not_inuse;
 extern bool Debug_appendonly_print_datumstream;
 extern bool Debug_appendonly_print_visimap;
+extern bool Debug_appendonly_print_visimap_allvisibleset;
 extern bool Debug_appendonly_print_compaction;
 extern bool Debug_bitmap_print_insert;
 extern bool enable_checksum_on_tables;

@@ -61,7 +61,7 @@ do { \
 	Assert(rangenum == (nranges - 1) % APPENDONLY_VISIMAP_MAX_RANGE); \
 	Assert((allvisibleset) != NULL); \
     (bmspp) = &((allvisibleset)->bitmapsets[segnum][nbms - 1]); \
-	elogif(Debug_appendonly_print_visimap, LOG, \
+	elogif(Debug_appendonly_print_visimap_allvisibleset, LOG, \
 		   "Append-only visimap allvisibleset: " \
 		   "(segnum %d, rownum %lu, nranges %d, nbms %d, rangenum %d)", \
 		   segnum, rownum, nranges, nbms, rangenum); \

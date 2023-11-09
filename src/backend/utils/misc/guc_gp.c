@@ -131,6 +131,7 @@ bool		Debug_appendonly_print_segfile_choice = false;
 bool        test_AppendOnlyHash_eviction_vs_just_marking_not_inuse = false;
 bool		Debug_appendonly_print_datumstream = false;
 bool		Debug_appendonly_print_visimap = false;
+bool		Debug_appendonly_print_visimap_allvisibleset = false;
 bool		Debug_appendonly_print_compaction = false;
 bool		Debug_bitmap_print_insert = false;
 bool		Test_print_direct_dispatch_info = false;
@@ -1173,6 +1174,17 @@ struct config_bool ConfigureNamesBool_gp[] =
 			GUC_SUPERUSER_ONLY | GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
 		},
 		&Debug_appendonly_print_visimap,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"debug_appendonly_print_visimap_allvisibleset", PGC_SUSET, DEVELOPER_OPTIONS,
+			gettext_noop("Print log messages for append-only visibility bitmap allvisibleset information."),
+			NULL,
+			GUC_SUPERUSER_ONLY | GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
+		},
+		&Debug_appendonly_print_visimap_allvisibleset,
 		false,
 		NULL, NULL, NULL
 	},
