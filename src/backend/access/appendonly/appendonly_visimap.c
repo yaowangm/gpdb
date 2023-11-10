@@ -126,12 +126,24 @@ static void AppendOnlyVisimap_Find(
  */
 static void
 AppendOnlyVisimapAllVisibleSet_Init(
-									AppendOnlyVisimapAllVisibleSet *allvisibleset,
+									AppendOnlyVisimapAllVisibleSet **allvisiblesetptr,
 									MemoryContext mctx)
 {
-	memset(allvisibleset, 0, sizeof(AppendOnlyVisimapAllVisibleSet));
+	MemoryContext oldContext = MemoryContextSwitchTo(mctx);
 
-	allvisibleset->mctx = mctx;
+	Assert(allvisiblesetptr != NULL);
+
+	/*
+	 * Instead of ending with OOM, using palloc_extended()
+	 * to return NULL quietly to stop allocating allvisibleset
+	 * structure for proceeding scan as far as possible.
+	 */
+	*allvisiblesetptr = (AppendOnlyVisimapAllVisibleSet *) palloc_extended(sizeof(AppendOnlyVisimapAllVisibleSet),
+																		   MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
+	if (*allvisiblesetptr != NULL)
+		(*allvisiblesetptr)->mctx = mctx;
+
+	MemoryContextSwitchTo(oldContext);
 }
 
 /*
@@ -139,17 +151,26 @@ AppendOnlyVisimapAllVisibleSet_Init(
  */
 static void
 AppendOnlyVisimapAllVisibleSet_Finish(
-						AppendOnlyVisimapAllVisibleSet *allvisibleset)
+						AppendOnlyVisimapAllVisibleSet **allvisiblesetptr)
 {
-	Assert(allvisibleset != NULL);
+	AppendOnlyVisimapAllVisibleSet *allvisibleset;
 
-	for (int i = 0; i < AOTupleId_MultiplierSegmentFileNum; i++)
+	Assert(allvisiblesetptr != NULL);
+
+	if ((allvisibleset = *allvisiblesetptr) != NULL)
 	{
-		for (int j = 0; j < AOVISIMAP_ALLVISIBLESET_MAX_BMS_COUNT; j++)
+		for (int i = 0; i < AOTupleId_MultiplierSegmentFileNum; i++)
 		{
-			bms_free(allvisibleset->bitmapsets[i][j]);
-			allvisibleset->bitmapsets[i][j] = NULL;
+			for (int j = 0; j < AOVISIMAP_ALLVISIBLESET_MAX_BMS_COUNT; j++)
+			{
+				bms_free(allvisibleset->bitmapsets[i][j]);
+				allvisibleset->bitmapsets[i][j] = NULL;
+			}
 		}
+		allvisibleset->mctx = NULL;
+
+		pfree(*allvisiblesetptr);
+		*allvisiblesetptr = NULL;
 	}
 }
 
@@ -163,6 +184,9 @@ AppendOnlyVisimapAllVisibleSet_CoversTuple(
 {
 	Bitmapset **bmspp;
 	int rangenum;
+
+	if (allvisibleset == NULL)
+		return false;
 
 	CALCULATE_BMS_AND_RANGENUM(allvisibleset, aoTupleId, bmspp, rangenum);
 
@@ -179,12 +203,16 @@ AppendOnlyVisimapAllVisibleSet_AddTuple(
 {
 	Bitmapset **bmspp;
 	int rangenum;
+	MemoryContext oldContext;
+
+	if (allvisibleset == NULL)
+		return;
 
 	CALCULATE_BMS_AND_RANGENUM(allvisibleset, aoTupleId, bmspp, rangenum);
 
-	Assert(CurrentMemoryContext == allvisibleset->mctx);
-
+	oldContext = MemoryContextSwitchTo(allvisibleset->mctx);
 	*bmspp = bms_add_member(*bmspp, rangenum);
+	MemoryContextSwitchTo(oldContext);
 }
 
 /*
@@ -204,8 +232,7 @@ AppendOnlyVisimap_Finish(
 
 	AppendOnlyVisimapStore_Finish(&visiMap->visimapStore, lockmode);
 	AppendOnlyVisimapEntry_Finish(&visiMap->visimapEntry);
-	if (gp_enable_aovisimap_allvisibleset)
-		AppendOnlyVisimapAllVisibleSet_Finish(&visiMap->allvisibleset);
+	AppendOnlyVisimapAllVisibleSet_Finish(&visiMap->allvisibleset);
 
 	MemoryContextDelete(visiMap->memoryContext);
 	visiMap->memoryContext = NULL;
@@ -251,6 +278,8 @@ AppendOnlyVisimap_Init(
 	if (gp_enable_aovisimap_allvisibleset)
 		AppendOnlyVisimapAllVisibleSet_Init(&visiMap->allvisibleset,
 											visiMap->memoryContext);
+	else
+		visiMap->allvisibleset = NULL;
 
 	MemoryContextSwitchTo(oldContext);
 }
@@ -304,7 +333,6 @@ AppendOnlyVisimap_IsVisible(
 							AOTupleId *aoTupleId)
 {
 	bool inAllVisible;
-	MemoryContext oldContext;
 
 	Assert(visiMap);
 
@@ -313,8 +341,7 @@ AppendOnlyVisimap_IsVisible(
 		   "(tupleId) = %s",
 		   AOTupleIdToString(aoTupleId));
 
-	if (gp_enable_aovisimap_allvisibleset &&
-		AppendOnlyVisimapAllVisibleSet_CoversTuple(&visiMap->allvisibleset,
+	if (AppendOnlyVisimapAllVisibleSet_CoversTuple(visiMap->allvisibleset,
 												   aoTupleId))
 		return true;
 
@@ -336,11 +363,7 @@ AppendOnlyVisimap_IsVisible(
 										 &inAllVisible))
 	{
 		if (inAllVisible)
-		{
-			oldContext = MemoryContextSwitchTo(visiMap->memoryContext);
-			AppendOnlyVisimapAllVisibleSet_AddTuple(&visiMap->allvisibleset, aoTupleId);
-			MemoryContextSwitchTo(oldContext);
-		}
+			AppendOnlyVisimapAllVisibleSet_AddTuple(visiMap->allvisibleset, aoTupleId);
 
 		return true;
 	}
