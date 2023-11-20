@@ -3876,8 +3876,6 @@ ProcessInterrupts(const char* filename, int lineno)
 		bool		lock_timeout_occurred;
 		bool		stmt_timeout_occurred;
 
-		elog(LOG,"Process interrupt for 'query cancel pending' (%s:%d)", filename, lineno);
-
 		/*
 		 * Don't allow query cancel interrupts while reading input from the
 		 * client, because we might lose sync in the FE/BE protocol.  (Die
