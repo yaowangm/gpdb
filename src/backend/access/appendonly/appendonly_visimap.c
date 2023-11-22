@@ -141,7 +141,11 @@ AppendOnlyVisimapAllVisibleSet_Init(
 	*allvisiblesetptr = (AppendOnlyVisimapAllVisibleSet *) palloc_extended(sizeof(AppendOnlyVisimapAllVisibleSet),
 																		   MCXT_ALLOC_NO_OOM | MCXT_ALLOC_ZERO);
 	if (*allvisiblesetptr != NULL)
+	{
+		(*allvisiblesetptr)->memUsedForBms = 0;
+		(*allvisiblesetptr)->stopGrowBms = false;
 		(*allvisiblesetptr)->mctx = mctx;
+	}
 
 	MemoryContextSwitchTo(oldContext);
 }
@@ -167,6 +171,8 @@ AppendOnlyVisimapAllVisibleSet_Finish(
 				allvisibleset->bitmapsets[i][j] = NULL;
 			}
 		}
+		allvisibleset->memUsedForBms = 0;
+		allvisibleset->stopGrowBms = false;
 		allvisibleset->mctx = NULL;
 
 		pfree(*allvisiblesetptr);
@@ -203,16 +209,34 @@ AppendOnlyVisimapAllVisibleSet_AddTuple(
 {
 	Bitmapset **bmspp;
 	int rangenum;
+	long deltaMem;
+	int oldWordNum;
 	MemoryContext oldContext;
 
 	if (allvisibleset == NULL)
 		return;
 
+	/* If we have hit memory limit, return */
+	if (allvisibleset->stopGrowBms)
+		return;
+
 	CALCULATE_BMS_AND_RANGENUM(allvisibleset, aoTupleId, bmspp, rangenum);
 
-	oldContext = MemoryContextSwitchTo(allvisibleset->mctx);
-	*bmspp = bms_add_member(*bmspp, rangenum);
-	MemoryContextSwitchTo(oldContext);
+	/* Calculate the delta memory: (new nwords - old nword) * size */
+	oldWordNum = *bmspp ? (*bmspp)->nwords : 0;
+	deltaMem = ((rangenum / BITS_PER_BITMAPWORD + 1) - oldWordNum) * SIZEOF_VOID_P;
+
+	/* If memUsedForBms hits work_mem, stop grow BMS */	
+	if (allvisibleset->memUsedForBms + deltaMem > work_mem)
+	{
+		allvisibleset->stopGrowBms = true;
+	} else {
+		oldContext = MemoryContextSwitchTo(allvisibleset->mctx);
+		*bmspp = bms_add_member(*bmspp, rangenum);
+		MemoryContextSwitchTo(oldContext);
+		if (deltaMem > 0)
+			allvisibleset->memUsedForBms += deltaMem;
+	}
 }
 
 /*

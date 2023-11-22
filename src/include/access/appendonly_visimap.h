@@ -55,6 +55,10 @@ typedef struct AppendOnlyVisimapAllVisibleSet
 {
 	/* a 2-d array, and each element is a pointer of Bitmapset */
 	Bitmapset *bitmapsets[AOTupleId_MultiplierSegmentFileNum][AOVISIMAP_ALLVISIBLESET_MAX_BMS_COUNT];
+	/* Memory used for BMSs referenced by bitmapsets (except bitmapsets itself)*/
+	long memUsedForBms;
+	/* Indicate that we have hit memory limit and stop creating more BMS */
+	bool stopGrowBms;
 	MemoryContext mctx;
 } AppendOnlyVisimapAllVisibleSet;
 
