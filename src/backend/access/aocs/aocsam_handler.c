@@ -1683,6 +1683,28 @@ aoco_scan_analyze_next_tuple(TableScanDesc scan, TransactionId OldestXmin,
 			 errmsg("API not supported for appendoptimized relations")));
 }
 
+/*
+ * Sameple rows from AOCO table
+ *
+ * Basic algorithm:
+ *
+ * Let RowSampler works in the scope of a "filtered" table which includes only
+ * live tuples. e.g. there is a table with 100 tuples including 30 live tuples
+ * and 70 dead tuples. RowSampler can "see" a table with only 30 tuples.
+ * Use a global cursor (globalOffset) to remember the actual position.
+ * When RowSampler skipped n tuples before a selecting, move globalOffset 
+ * forward by n live tuples (ignoring all dead tuples in the scanning).
+ * When RowSampler selected a tuple which is dead, continue to move globalOffset
+ * till getting a live tuple.
+ *
+ * Peformance improvement:
+ *
+ * For now we use aocs_get_target_tuple() to walk through the table, which is
+ * unnecessary because we need just to fetch live tuples. A visimap scan
+ * without table scan will have better performance. However, it is not easy
+ * to implement since the code of visimap scan ties to table scan heavily.
+ * We can consider it for performance improvement in future.
+ */
 static int
 aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 						 int targrows, double *totalrows, double *totaldeadrows)
@@ -1693,6 +1715,18 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 	int		        numrows = 0;	/* # rows now in reservoir */
 	double	        liverows = 0;	/* # live rows seen */
 	double	        deadrows = 0;	/* # dead rows seen */
+
+	/*
+	 * Last row number selected by RowSampler, -1 means not-started
+	 * Note the scope is all live tuples (RowSampler->N)
+	 */
+	int64			lastSelectedRowNum = -1;
+
+	/*
+	 * Row Offset in global scope (including all live and dead tuples)
+	 * always point to the next tuple to be read
+	 */
+	int64			globalOffset = 0;
 
 	Assert(targrows > 0);
 
@@ -1722,20 +1756,100 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 	*totalrows = (double) (totaltupcount - totaldeadtupcount);
 	*totaldeadrows = (double) totaldeadtupcount;
 
-	/* Prepare for sampling tuple numbers */
+	/*
+	 * Prepare for sampling tuple numbers
+	 * Note that RowSampler works in the scope of live tuples
+	 */
 	RowSamplerData rs;
 	RowSampler_Init(&rs, *totalrows, targrows, random());
 
 	while (RowSampler_HasMore(&rs))
 	{
-		aocoscan->targrow = RowSampler_Next(&rs);
+		/* Selected row number in scope of live tuples */
+		int64 selectedRowNum = RowSampler_Next(&rs);
 
-		vacuum_delay_point();
+		/* Live tuple count skipped in current loop */
+		int64 skippedTupleCount = 0;
 
-		if (aocs_get_target_tuple(aocoscan, aocoscan->targrow, slot))
+		/*
+		 * There is a special case: if the table is full (no dead tuple), all
+		 * skipped tuples must be live. We don't need to check them, but just
+		 * calculate skippedTupleCount and add it to globalOffset/liverows.
+		 *
+		 * Another case is: if Debug_aocotbl_sampling_notablescan is set, just
+		 * skip tuples without checking, as the legacy code did.
+		 */
+		if (totaldeadtupcount == 0 || Debug_aocotbl_sampling_notablescan)
 		{
-			rows[numrows++] = ExecCopySlotHeapTuple(slot);
+			skippedTupleCount = selectedRowNum - lastSelectedRowNum - 1;
+			globalOffset += skippedTupleCount;
+			liverows += skippedTupleCount;
+		}
+		else
+		{
+			/* Skip live tuples count by which RowSampler skipped */
+			while (skippedTupleCount < selectedRowNum - lastSelectedRowNum - 1)
+			{
+				aocoscan->targrow = globalOffset;
+
+				/*
+				 * Set checkVisiOnly to true to indicate aocs_get_target_tuple()
+				 * to only check the visibility of the row without fetching the
+				 * row. Note checkVisiOnly is valid only for blk dir scan.
+				 */
+				if (aocs_get_target_tuple(aocoscan,
+										  aocoscan->targrow,
+										  slot,
+										  true))
+				{
+					skippedTupleCount++;
+					liverows++;
+				}
+				else
+					deadrows++;
+				globalOffset++;
+				ExecClearTuple(slot);
+
+				if (aocoscan->targrow % 50000 == 0)
+					vacuum_delay_point();
+			}
+		}
+
+		lastSelectedRowNum = selectedRowNum;
+		aocoscan->targrow = globalOffset;
+
+		if (Debug_aocotbl_sampling_notablescan)
+		{
+			/*
+			 * If Debug_aocotbl_sampling_notablescan is set, just fetch the
+			 * tuple even it's a dead one, as the legacy code did.
+			 */
+			aocs_get_target_tuple(aocoscan, aocoscan->targrow, slot, false);
+		}
+		else
+		{
+			/* If the selected tuple is dead, continue to find a live one */
+			while (!aocs_get_target_tuple(aocoscan,
+										  aocoscan->targrow,
+										  slot,
+										  false))
+			{
+				globalOffset++;
+				aocoscan->targrow = globalOffset;
+				deadrows++;
+				ExecClearTuple(slot);
+
+				if (aocoscan->targrow % 50000 == 0)
+					vacuum_delay_point();
+			}
+		}
+
+		/* take the last fetch into account */
+		globalOffset++;
+		if (!TTS_EMPTY(slot))
+		{
 			liverows++;
+			rows[numrows++] = ExecCopySlotHeapTuple(slot);
 		}
 		else
 			deadrows++;
@@ -1753,10 +1867,18 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 		SIMPLE_FAULT_INJECTOR("analyze_block");
 
 		ExecClearTuple(slot);
+
+		vacuum_delay_point();
 	}
 
 	ExecDropSingleTupleTableSlot(slot);
 	table_endscan(scan);
+
+	Assert(globalOffset == (liverows + deadrows));
+	Assert(Debug_aocotbl_sampling_notablescan || liverows == rs.t);
+
+	/* If totaldeadtupcount == 0, we must find no dead tuple */
+	Assert(totaldeadtupcount != 0 || deadrows == 0);
 
 	/*
 	 * Emit some interesting relation info
@@ -1767,7 +1889,7 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 					"%d rows in sample, %.0f accurate total live rows, "
 					"%.f accurate total dead rows",
 					RelationGetRelationName(onerel),
-					rs.m, liverows, deadrows, numrows,
+					globalOffset - 1, liverows, deadrows, numrows,
 					*totalrows, *totaldeadrows)));
 
 	return numrows;

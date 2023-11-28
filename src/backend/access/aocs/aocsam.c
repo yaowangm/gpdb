@@ -818,9 +818,15 @@ aocs_locate_target_segment(AOCSScanDesc scan, int64 targrow)
 
 /*
  * block directory based get_target_tuple()
+ *
+ * If checkVisiOnly is false, tuple will be returned by slot. If it is true,
+ * no tuple will be returned.
  */
 static bool
-aocs_blkdirscan_get_target_tuple(AOCSScanDesc scan, int64 targrow, TupleTableSlot *slot)
+aocs_blkdirscan_get_target_tuple(AOCSScanDesc scan,
+								 int64 targrow,
+								 TupleTableSlot *slot,
+								 bool checkVisiOnly)
 {
 	int segno, segidx;
 	int64 rownum = -1;
@@ -915,6 +921,11 @@ aocs_blkdirscan_get_target_tuple(AOCSScanDesc scan, int64 targrow, TupleTableSlo
 
 	/* form the target tuple TID */
 	AOTupleIdInit(&aotid, segno, rownum);
+
+	/* If checkVisiOnly is true, just return the visibility of the tuple. */
+	if (checkVisiOnly)
+		return AppendOnlyVisimap_IsVisible(&scan->aocsfetch->visibilityMap,
+										   &aotid);
 
 	ExecClearTuple(slot);
 
@@ -1159,9 +1170,16 @@ aocs_gettuple(AOCSScanDesc scan, int64 targrow, TupleTableSlot *slot)
  *
  * Note: for the duration of the scan, we expect targrow to be monotonically
  * increasing in between successive calls.
+ *
+ * If checkVisiOnly is false, tuple will be returned by slot. If it is true,
+ * no tuple will be returned.
+ * Note checkVisiOnly is valid only for blk dir scan (aoscan->blkdirscan is
+ * set). If it is not blk dir scan, checkVisiOnly will be ignored and the
+ * tuple will always be returned if the tuple is live.
  */
 bool
-aocs_get_target_tuple(AOCSScanDesc aoscan, int64 targrow, TupleTableSlot *slot)
+aocs_get_target_tuple(AOCSScanDesc aoscan, int64 targrow, TupleTableSlot *slot,
+					  bool checkVisiOnly)
 {
 	if (aoscan->columnScanInfo.relationTupleDesc == NULL)
 	{
@@ -1172,7 +1190,7 @@ aocs_get_target_tuple(AOCSScanDesc aoscan, int64 targrow, TupleTableSlot *slot)
 	}
 
 	if (aoscan->blkdirscan != NULL)
-		return aocs_blkdirscan_get_target_tuple(aoscan, targrow, slot);
+		return aocs_blkdirscan_get_target_tuple(aoscan, targrow, slot, checkVisiOnly);
 
 	if (aocs_getsegment(aoscan, targrow) < 0)
 	{
