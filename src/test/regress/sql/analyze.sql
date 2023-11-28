@@ -445,15 +445,52 @@ create table ao_analyze_test (i int4) with (appendonly=true);
 insert into ao_analyze_test select g from generate_series(1, 100000) g;
 create index ao_analyze_test_idx on ao_analyze_test (i);
 analyze ao_analyze_test;
+
 select relname, reltuples from pg_class where relname like 'ao_analyze_test%' order by relname;
 
 -- and same for AOCS
 create table aocs_analyze_test (i int4) with (appendonly=true, orientation=column);
 insert into aocs_analyze_test select g from generate_series(1, 100000) g;
 create index aocs_analyze_test_idx on aocs_analyze_test (i);
-analyze aocs_analyze_test;
+
+-- Use Variable Step Length sampling algorithm
+
+set gp_enable_aotable_vsl_sampling=off;
+
+-- perform analyze on a full table
+analyze ao_analyze_test;
+select count(*) from ao_analyze_test;
+-- generate a table with 3/4 live tuples
+delete from ao_analyze_test where i % 4 = 0;
+analyze ao_analyze_test;
+select count(*) from ao_analyze_test;
+-- generate a table with 1/4 live tuples
+delete from ao_analyze_test where (i % 4 = 1) or (i % 4 = 2);
+analyze ao_analyze_test;
+select count(*) from ao_analyze_test;
+
+-- Use legacy sampling algorithm
+
+delete from ao_analyze_test;
+insert into ao_analyze_test select g from generate_series(1, 100000) g;
+
+set gp_enable_aotable_vsl_sampling=on;
+
+-- perform analyze on a full table
+analyze ao_analyze_test;
+select count(*) from ao_analyze_test;
+-- generate a table with 3/4 live tuples
+delete from ao_analyze_test where i % 4 = 0;
+analyze ao_analyze_test;
+select count(*) from ao_analyze_test;
+-- generate a table with 1/4 live tuples
+delete from ao_analyze_test where (i % 4 = 1) or (i % 4 = 2);
+analyze ao_analyze_test;
+select count(*) from ao_analyze_test;
+
 select relname, reltuples from pg_class where relname like 'aocs_analyze_test%' order by relname;
 
+reset gp_enable_aotable_vsl_sampling;
 reset default_statistics_target;
 
 -- Test column name called totalrows

@@ -136,6 +136,7 @@ bool		Debug_appendonly_print_compaction = false;
 bool		Debug_bitmap_print_insert = false;
 bool		Test_print_direct_dispatch_info = false;
 bool		Test_copy_qd_qe_split = false;
+bool		gp_enable_aotable_vsl_sampling = true;
 bool		gp_permit_relation_node_change = false;
 int			gp_max_local_distributed_cache = 1024;
 bool		gp_appendonly_verify_block_checksums = true;
@@ -1475,6 +1476,17 @@ struct config_bool ConfigureNamesBool_gp[] =
 		},
 		&Debug_bitmap_print_insert,
 		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"gp_enable_aotable_vsl_sampling", PGC_SUSET, DEVELOPER_OPTIONS,
+			gettext_noop("Enable Variable Step Length sampling for ao/aoco table"),
+			NULL,
+			GUC_SUPERUSER_ONLY | GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
+		},
+		&gp_enable_aotable_vsl_sampling,
+		true,
 		NULL, NULL, NULL
 	},
 
