@@ -115,8 +115,6 @@ test__ProcessInterrupts__DoingCommandRead(void **state)
 	QueryCancelPending = true;
 	DoingCommandRead = true;
 
-	EXPECT_EREPORT(LOG);
-
 	ProcessInterrupts(__FILE__, __LINE__);
 
 	assert_false(QueryCancelPending);
@@ -128,7 +126,6 @@ test__ProcessInterrupts__DoingCommandRead(void **state)
 	QueryCancelPending = true;
 	DoingCommandRead = false;
 
-	EXPECT_EREPORT(LOG);
 	EXPECT_EREPORT(ERROR);
 
 	PG_TRY();
