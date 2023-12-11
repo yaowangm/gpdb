@@ -2704,7 +2704,7 @@ aoco_scan_sample_next_tuple(TableScanDesc scan, SampleScanState *scanstate,
 			aoscan->targrow = currblk * AO_MAX_TUPLES_PER_HEAP_BLOCK + targetoffset - 1;
 			Assert(aoscan->targrow < totalrows);
 
-			if (aocs_get_target_tuple(aoscan, aoscan->targrow, slot))
+			if (aocs_get_target_tuple(aoscan, aoscan->targrow, slot, false))
 				return true;
 
 			/* tuple was deleted, loop around to try the next one */
