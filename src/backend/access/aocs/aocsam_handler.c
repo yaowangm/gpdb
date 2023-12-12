@@ -1696,14 +1696,6 @@ aoco_scan_analyze_next_tuple(TableScanDesc scan, TransactionId OldestXmin,
  * forward by n live tuples (ignoring all dead tuples in the scanning).
  * When RowSampler selected a tuple which is dead, continue to move globalOffset
  * till getting a live tuple.
- *
- * Peformance improvement:
- *
- * For now we use aocs_get_target_tuple() to walk through the table, which is
- * unnecessary because we need just to fetch live tuples. A visimap scan
- * without table scan will have better performance. However, it is not easy
- * to implement since the code of visimap scan ties to table scan heavily.
- * We can consider it for performance improvement in future.
  */
 static int
 aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
