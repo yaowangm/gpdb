@@ -33,10 +33,6 @@
 #include "cdb/cdbvars.h"
 #include "cdb/cdbpathlocus.h"	/* me */
 
-static List *cdb_build_distribution_keys(PlannerInfo *root,
-										 Index rti,
-										 GpPolicy *policy);
-
 /*
  * cdbpathlocus_equal
  *

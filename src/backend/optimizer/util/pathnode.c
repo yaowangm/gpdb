@@ -76,6 +76,8 @@ static bool set_append_path_locus(PlannerInfo *root, Path *pathnode, RelOptInfo 
 static CdbPathLocus
 adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 							List *resultRelations, List *subpaths,
+							RelOptInfo *rel,
+							List *returningLists,
 							List *is_split_updates);
 
 /*****************************************************************************
@@ -5280,6 +5282,9 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->path.parallel_workers = 0;
 	pathnode->path.pathkeys = NIL;
 
+	if (returningLists)
+		pathnode->path.pathtarget = make_pathtarget_from_tlist(linitial(returningLists));
+
 	/*
 	 * Put Motions on top of the subpaths as needed, and set the locus of the
 	 * ModifyTable path itself.
@@ -5288,6 +5293,8 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 		pathnode->path.locus =
 			adjust_modifytable_subpaths(root, operation,
 										resultRelations, subpaths,
+										rel,
+										returningLists,
 										is_split_updates);
 	else
 	{
@@ -5369,6 +5376,8 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 static CdbPathLocus
 adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 							List *resultRelations, List *subpaths,
+							RelOptInfo *rel,
+							List *returningLists,
 							List *is_split_updates)
 {
 	/*
@@ -5380,6 +5389,7 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 	bool		all_subplans_entry = true,
 				all_subplans_replicated = true;
 	int			numsegments = -1;
+	List		*distkeys = NIL;
 
 	if (operation == CMD_UPDATE)
 		lci = list_head(is_split_updates);
@@ -5419,6 +5429,9 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 		if (operation == CMD_INSERT)
 		{
 			subpath = create_motion_path_for_insert(root, targetPolicy, subpath);
+			distkeys = cdb_build_distribution_keys(root,
+												   rti,
+												   targetPolicy);
 		}
 		else if (operation == CMD_DELETE)
 		{
@@ -5490,10 +5503,20 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 
 		Assert(numsegments >= 0);
 
-		CdbPathLocus_MakeStrewn(&resultLocus, numsegments);
+		CdbPathLocus_MakeHashed(&resultLocus, distkeys, numsegments);
 
 		return resultLocus;
 	}
+	/* else
+	{
+		CdbPathLocus resultLocus;
+
+		Assert(numsegments >= 0);
+
+		CdbPathLocus_MakeStrewn(&resultLocus, numsegments);
+
+		return resultLocus;
+	} */
 }
 
 /*
