@@ -76,7 +76,6 @@ static bool set_append_path_locus(PlannerInfo *root, Path *pathnode, RelOptInfo 
 static CdbPathLocus
 adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 							List *resultRelations, List *subpaths,
-							RelOptInfo *rel,
 							List *returningLists,
 							List *is_split_updates);
 
@@ -5282,8 +5281,23 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->path.parallel_workers = 0;
 	pathnode->path.pathkeys = NIL;
 
+	/*
+	 * If returningLists is not NIL, it means the subquery returns something,
+	 * e.g.:
+	 *   WITH aa AS (
+	 *     INSERT INTO cte_returning_locus SELECT generate_series(3,300)
+	 *     RETURNING c1
+	 *     )
+	 *	 SELECT count(*) FROM aa,cte_returning_locus
+	 *   WHERE aa.c1 = cte_returning_locus.c1;
+	 * For the case, we need to set proper pathtarget according to the 
+	 * returningLists, and the pathtarget will be used by
+	 * cdbpathlocus_from_subquery() later (see cdb_pull_up_eclass() for
+	 * details).
+	 */
 	if (returningLists)
-		pathnode->path.pathtarget = make_pathtarget_from_tlist(linitial(returningLists));
+		pathnode->path.pathtarget =
+			make_pathtarget_from_tlist(linitial(returningLists));
 
 	/*
 	 * Put Motions on top of the subpaths as needed, and set the locus of the
@@ -5293,7 +5307,6 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 		pathnode->path.locus =
 			adjust_modifytable_subpaths(root, operation,
 										resultRelations, subpaths,
-										rel,
 										returningLists,
 										is_split_updates);
 	else
@@ -5376,7 +5389,6 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 static CdbPathLocus
 adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 							List *resultRelations, List *subpaths,
-							RelOptInfo *rel,
 							List *returningLists,
 							List *is_split_updates)
 {
@@ -5389,7 +5401,7 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 	bool		all_subplans_entry = true,
 				all_subplans_replicated = true;
 	int			numsegments = -1;
-	List		*distkeys = NIL;
+	List	   *distkeys = NIL;
 
 	if (operation == CMD_UPDATE)
 		lci = list_head(is_split_updates);
@@ -5429,6 +5441,10 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 		if (operation == CMD_INSERT)
 		{
 			subpath = create_motion_path_for_insert(root, targetPolicy, subpath);
+			/*
+			 * For a INSERT, create distkeys according to current RTE,
+			 * so it may be used by cdbpathlocus_from_subquery() later
+			 */
 			distkeys = cdb_build_distribution_keys(root,
 												   rti,
 												   targetPolicy);
@@ -5497,8 +5513,13 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 		CdbPathLocus_MakeReplicated(&resultLocus, numsegments);
 		return resultLocus;
 	}
-	else
+	else if (distkeys != NIL)
 	{
+		/*
+		 * If distkeys is not NIL, create Hashed locus; if upper
+		 * node has compatible distribution, we can avoid an extra
+		 * distribution motion.
+		 */
 		CdbPathLocus resultLocus;
 
 		Assert(numsegments >= 0);
@@ -5507,8 +5528,9 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 
 		return resultLocus;
 	}
-	/* else
+	else
 	{
+		/* For rest cases, we have to create Strewn locus */
 		CdbPathLocus resultLocus;
 
 		Assert(numsegments >= 0);
@@ -5516,7 +5538,7 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 		CdbPathLocus_MakeStrewn(&resultLocus, numsegments);
 
 		return resultLocus;
-	} */
+	}
 }
 
 /*

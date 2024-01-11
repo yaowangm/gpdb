@@ -388,7 +388,7 @@ bool
 cdbpathlocus_is_valid(CdbPathLocus locus);
 
 List *cdb_build_distribution_keys(struct PlannerInfo *root,
-                                         Index rti,
-                                         struct GpPolicy *policy);
+								  Index				  rti,
+								  struct GpPolicy 	 *policy);
 
 #endif   /* CDBPATHLOCUS_H */
