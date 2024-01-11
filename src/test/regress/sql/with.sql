@@ -1190,3 +1190,22 @@ create temp table with_test (i int);
 with with_test as (select 42) insert into with_test select * from with_test;
 select * from with_test;
 drop table with_test;
+
+-- Check modifytable path: a INSERT RETURNING in a CTE, and check whether locus
+-- of CTE is set correctly, and upper node chooses correct motion.
+
+-- CTE returns one column, which is the dist key
+
+CREATE TABLE cte_t1(c1 int) DISTRIBUTED BY (c1);
+INSERT INTO cte_t1 SELECT generate_series(1, 100);
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t1 SELECT generate_series(3,300) RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t1 WHERE aa.c1 = cte_t1.c1;
+
+WITH aa AS (
+	INSERT INTO cte_t1 SELECT generate_series(3,300) RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t1 WHERE aa.c1 = cte_t1.c1;
+
+drop table cte_t1;

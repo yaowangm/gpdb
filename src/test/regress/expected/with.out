@@ -2435,3 +2435,39 @@ select * from with_test;
 (1 row)
 
 drop table with_test;
+-- Check modifytable path: a INSERT RETURNING in a CTE, and check whether locus
+-- of CTE is set correctly, and upper node chooses correct motion.
+-- CTE returns one column, which is the dist key
+CREATE TABLE cte_t1(c1 int) DISTRIBUTED BY (c1);
+INSERT INTO cte_t1 SELECT generate_series(1, 100);
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t1 SELECT generate_series(3,300) RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t1 WHERE aa.c1 = cte_t1.c1;
+                                                      QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=576.57..576.58 rows=1 width=8)
+   ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=576.51..576.56 rows=3 width=8)
+         ->  Partial Aggregate  (cost=576.51..576.52 rows=1 width=8)
+               ->  Hash Join  (cost=9.70..552.60 rows=9566 width=0)
+                     Hash Cond: (cte_t1.c1 = cte_t1_1.c1)
+                     ->  Seq Scan on cte_t1  (cost=0.00..355.00 rows=32100 width=4)
+                     ->  Hash  (cost=8.46..8.46 rows=99 width=4)
+                           ->  Insert on cte_t1 cte_t1_1  (cost=0.00..8.46 rows=99 width=4)
+                                 ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=0.00..8.46 rows=99 width=4)
+                                       Hash Key: (generate_series(3, 300))
+                                       ->  ProjectSet  (cost=0.00..1.51 rows=298 width=4)
+                                             ->  Result  (cost=0.00..0.01 rows=1 width=0)
+ Optimizer: Postgres-based planner
+(13 rows)
+
+WITH aa AS (
+	INSERT INTO cte_t1 SELECT generate_series(3,300) RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t1 WHERE aa.c1 = cte_t1.c1;
+ count 
+-------
+    98
+(1 row)
+
+drop table cte_t1;
