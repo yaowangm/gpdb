@@ -1194,10 +1194,13 @@ drop table with_test;
 -- Check modifytable path: a INSERT RETURNING in a CTE, and check whether locus
 -- of CTE is set correctly, and upper node chooses correct motion.
 
--- CTE returns one column, which is the dist key
+-- create table cte_t1 with one column
 
 CREATE TABLE cte_t1(c1 int) DISTRIBUTED BY (c1);
 INSERT INTO cte_t1 SELECT generate_series(1, 100);
+
+-- CTE returns one column, which is the dist key
+
 EXPLAIN WITH aa AS (
 	INSERT INTO cte_t1 SELECT generate_series(3,300) RETURNING c1
 )
@@ -1209,3 +1212,46 @@ WITH aa AS (
 SELECT count(*) FROM aa, cte_t1 WHERE aa.c1 = cte_t1.c1;
 
 drop table cte_t1;
+
+-- create table cte_t1 with one column
+
+CREATE TABLE cte_t2(c1 int, c2 int) DISTRIBUTED BY (c1);
+INSERT INTO cte_t2 SELECT generate_series(1, 100), generate_series(1, 100);
+
+-- CTE returns one column, which is the dist key
+
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300)  RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c1 = cte_t2.c1;
+
+WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c1 = cte_t2.c1;
+
+-- CTE returns another column, which is not the dist key
+
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t2  SELECT generate_series(3,300), generate_series(3,300) RETURNING c2
+)
+SELECT count(*) FROM aa, cte_t2  WHERE aa.c2 = cte_t2.c2;
+
+WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c2
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c2 = cte_t2.c2;
+
+-- CTE returns two columns, one of them is the dist key
+
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c1, c2
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c1 = cte_t2.c1;
+
+WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c1, c2
+)
+SELECT count(*) FROM aa, cte_t2  WHERE aa.c1 = cte_t2.c1;
+
+drop table cte_t2;

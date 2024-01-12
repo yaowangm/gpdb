@@ -2437,9 +2437,10 @@ select * from with_test;
 drop table with_test;
 -- Check modifytable path: a INSERT RETURNING in a CTE, and check whether locus
 -- of CTE is set correctly, and upper node chooses correct motion.
--- CTE returns one column, which is the dist key
+-- create table cte_t1 with one column
 CREATE TABLE cte_t1(c1 int) DISTRIBUTED BY (c1);
 INSERT INTO cte_t1 SELECT generate_series(1, 100);
+-- CTE returns one column, which is the dist key
 EXPLAIN WITH aa AS (
 	INSERT INTO cte_t1 SELECT generate_series(3,300) RETURNING c1
 )
@@ -2471,3 +2472,102 @@ SELECT count(*) FROM aa, cte_t1 WHERE aa.c1 = cte_t1.c1;
 (1 row)
 
 drop table cte_t1;
+-- create table cte_t1 with one column
+CREATE TABLE cte_t2(c1 int, c2 int) DISTRIBUTED BY (c1);
+INSERT INTO cte_t2 SELECT generate_series(1, 100), generate_series(1, 100);
+-- CTE returns one column, which is the dist key
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300)  RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c1 = cte_t2.c1;
+                                                      QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=520.14..520.15 rows=1 width=8)
+   ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=520.08..520.13 rows=3 width=8)
+         ->  Partial Aggregate  (cost=520.08..520.09 rows=1 width=8)
+               ->  Hash Join  (cost=9.71..498.70 rows=8553 width=0)
+                     Hash Cond: (cte_t2.c1 = cte_t2_1.c1)
+                     ->  Seq Scan on cte_t2  (cost=0.00..321.00 rows=28700 width=4)
+                     ->  Hash  (cost=8.46..8.46 rows=99 width=4)
+                           ->  Insert on cte_t2 cte_t2_1  (cost=0.00..8.46 rows=99 width=8)
+                                 ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=0.00..8.46 rows=99 width=8)
+                                       Hash Key: (generate_series(3, 300))
+                                       ->  ProjectSet  (cost=0.00..1.51 rows=298 width=8)
+                                             ->  Result  (cost=0.00..0.01 rows=1 width=0)
+ Optimizer: Postgres-based planner
+(13 rows)
+
+WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c1
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c1 = cte_t2.c1;
+ count 
+-------
+    98
+(1 row)
+
+-- CTE returns another column, which is not the dist key
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t2  SELECT generate_series(3,300), generate_series(3,300) RETURNING c2
+)
+SELECT count(*) FROM aa, cte_t2  WHERE aa.c2 = cte_t2.c2;
+                                                         QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=526.60..526.61 rows=1 width=8)
+   ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=526.54..526.59 rows=3 width=8)
+         ->  Partial Aggregate  (cost=526.54..526.55 rows=1 width=8)
+               ->  Hash Join  (cost=16.16..505.16 rows=8553 width=0)
+                     Hash Cond: (cte_t2.c2 = cte_t2_1.c2)
+                     ->  Seq Scan on cte_t2  (cost=0.00..321.00 rows=28700 width=4)
+                     ->  Hash  (cost=12.44..12.44 rows=298 width=4)
+                           ->  Broadcast Motion 3:3  (slice2; segments: 3)  (cost=0.00..12.44 rows=298 width=4)
+                                 ->  Insert on cte_t2 cte_t2_1  (cost=0.00..8.46 rows=99 width=8)
+                                       ->  Redistribute Motion 1:3  (slice3; segments: 1)  (cost=0.00..8.46 rows=99 width=8)
+                                             Hash Key: (generate_series(3, 300))
+                                             ->  ProjectSet  (cost=0.00..1.51 rows=298 width=8)
+                                                   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+ Optimizer: Postgres-based planner
+(14 rows)
+
+WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c2
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c2 = cte_t2.c2;
+ count 
+-------
+   396
+(1 row)
+
+-- CTE returns two columns, one of them is the dist key
+EXPLAIN WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c1, c2
+)
+SELECT count(*) FROM aa, cte_t2 WHERE aa.c1 = cte_t2.c1;
+                                                         QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=520.14..520.15 rows=1 width=8)
+   ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=520.08..520.13 rows=3 width=8)
+         ->  Partial Aggregate  (cost=520.08..520.09 rows=1 width=8)
+               ->  Hash Join  (cost=9.71..498.70 rows=8553 width=0)
+                     Hash Cond: (cte_t2.c1 = aa.c1)
+                     ->  Seq Scan on cte_t2  (cost=0.00..321.00 rows=28700 width=4)
+                     ->  Hash  (cost=8.46..8.46 rows=99 width=4)
+                           ->  Subquery Scan on aa  (cost=0.00..8.46 rows=99 width=4)
+                                 ->  Insert on cte_t2 cte_t2_1  (cost=0.00..8.46 rows=99 width=8)
+                                       ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=0.00..8.46 rows=99 width=8)
+                                             Hash Key: (generate_series(3, 300))
+                                             ->  ProjectSet  (cost=0.00..1.51 rows=298 width=8)
+                                                   ->  Result  (cost=0.00..0.01 rows=1 width=0)
+ Optimizer: Postgres-based planner
+(14 rows)
+
+WITH aa AS (
+	INSERT INTO cte_t2 SELECT generate_series(3,300), generate_series(3,300) RETURNING c1, c2
+)
+SELECT count(*) FROM aa, cte_t2  WHERE aa.c1 = cte_t2.c1;
+ count 
+-------
+   694
+(1 row)
+
+drop table cte_t2;
