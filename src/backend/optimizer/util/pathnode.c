@@ -5282,22 +5282,29 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->path.pathkeys = NIL;
 
 	/*
-	 * If returningLists is not NIL, it means the subquery returns something,
-	 * e.g.:
+	 * If operation is CMD_INSERT and returningLists is not NIL, it means
+	 * the INSERT subquery returns something, e.g.:
+	 *
 	 *   WITH aa AS (
 	 *     INSERT INTO cte_returning_locus SELECT generate_series(3,300)
 	 *     RETURNING c1
 	 *     )
 	 *	 SELECT count(*) FROM aa,cte_returning_locus
 	 *   WHERE aa.c1 = cte_returning_locus.c1;
+	 *
 	 * For the case, we need to set proper pathtarget according to the 
 	 * returningLists, and the pathtarget will be used by
 	 * cdbpathlocus_from_subquery() later (see cdb_pull_up_eclass() for
 	 * details).
+	 * We assume returningLists must have only one item because there is
+	 * only one subpath for CMD_INSERT.
 	 */
-	if (returningLists)
+	if (operation == CMD_INSERT && returningLists)
+	{
+		Assert(list_length(returningLists) == 1);
 		pathnode->path.pathtarget =
 			make_pathtarget_from_tlist(linitial(returningLists));
+	}
 
 	/*
 	 * Put Motions on top of the subpaths as needed, and set the locus of the
@@ -5440,6 +5447,13 @@ adjust_modifytable_subpaths(PlannerInfo *root, CmdType operation,
 
 		if (operation == CMD_INSERT)
 		{
+			/*
+			 * For a INSERT, there must be only one sub path, and we will
+			 * create distkey for the RTE.
+			 */
+			Assert(list_length(subpaths) == 1);
+			Assert(distkeys == NIL);
+
 			subpath = create_motion_path_for_insert(root, targetPolicy, subpath);
 			/*
 			 * For a INSERT, create distkeys according to current RTE,
