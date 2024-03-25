@@ -1746,11 +1746,12 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 	 * Prepare for sampling tuple numbers
 	 */
 
-	if (gp_enable_aotable_vsl_sampling)
+	if (aocoscan->blkdirscan != NULL &&
+		gp_enable_aotable_vsl_sampling)
 	{
 		/*
-		 * If gp_enable_aotable_vsl_sampling is endabled, adopt the new 
-		 * Variable Step Length sampling algorithm.
+		 * If it is a block dir scan and gp_enable_aotable_vsl_sampling is
+		 * endabled, adopt the new Variable Step Length sampling algorithm.
 		 *
 		 * There are 3 phases:
 		 *   1. Fetch the row numbers of selected tuples, and save them
