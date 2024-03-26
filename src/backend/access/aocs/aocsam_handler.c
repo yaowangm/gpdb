@@ -1829,6 +1829,11 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 		reset = true;
 		for (int i = 0; i < rowNumIdx; i++)
 		{
+			/*
+			 * It is possible that the tuple has been deleted by another
+			 * transaction after phase 1. For the case, simply ignore the
+			 * tuple.
+			 */
 			if (aocs_get_target_tuple(aocoscan,
 									  rowNumSet[i],
 									  slot,
@@ -1838,10 +1843,7 @@ aoco_acquire_sample_rows(Relation onerel, int elevel, HeapTuple *rows,
 				rows[numrows++] = ExecCopySlotHeapTuple(slot);
 				ExecClearTuple(slot);
 			}
-			else
-				elog(ERROR,
-					 "tuple was marked live in visimap but cannot be fetched");
-				reset = false;
+			reset = false;
 
 			if (i % AO_TABLE_SAMPLING_CHECK_INTERVAL == 0)
 				vacuum_delay_point();
