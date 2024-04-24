@@ -587,16 +587,16 @@ get_eclass_for_sort_expr(PlannerInfo *root,
 						 bool create_it)
 {
 	return get_eclass_for_sort_expr_real(root,
-										expr,
-										nullable_relids,
-										opfamilies,
-										opcintype,
-										collation,
-										sortref,
-										rel,
-										create_it,
-										/* ignore_relabel_type is true by default */
-										true);
+										 expr,
+										 nullable_relids,
+										 opfamilies,
+										 opcintype,
+										 collation,
+										 sortref,
+										 rel,
+										 create_it,
+										 /* ignore_relabel_type is false by default */
+										 false);
 }
 
 /*
@@ -636,18 +636,22 @@ get_eclass_for_sort_expr(PlannerInfo *root,
  * process_equivalence() would do; that is, generated from a mergejoinable
  * equality operator.  Else we might fail to detect valid equivalences,
  * generating poor (but not incorrect) plans.
+ *
+ * If ignore_relabel_type is true, "naked" exprs will be stripped from both
+ * input expr and root->eq_classes by ignoring outer RelabelType, and be
+ * compared. If it is false, the two exprs will compared directly.
  */
 EquivalenceClass *
 get_eclass_for_sort_expr_real(PlannerInfo *root,
-						 Expr *expr,
-						 Relids nullable_relids,
-						 List *opfamilies,
-						 Oid opcintype,
-						 Oid collation,
-						 Index sortref,
-						 Relids rel,
-						 bool create_it,
-						 bool ignore_relabel_type)
+						 	 Expr *expr,
+						 	 Relids nullable_relids,
+						 	 List *opfamilies,
+						 	 Oid opcintype,
+						 	 Oid collation,
+						 	 Index sortref,
+						 	 Relids rel,
+						 	 bool create_it,
+						 	 bool ignore_relabel_type)
 {
 	Relids		expr_relids;
 	EquivalenceClass *newec;
@@ -660,7 +664,7 @@ get_eclass_for_sort_expr_real(PlannerInfo *root,
 	 */
 	expr = canonicalize_ec_expression(expr, opcintype, collation);
 
-	if (!ignore_relabel_type)
+	if (ignore_relabel_type)
 	{
 		while (IsA(expr, RelabelType))
 			expr = (Expr *) ((RelabelType *) expr)->arg;
@@ -707,7 +711,7 @@ get_eclass_for_sort_expr_real(PlannerInfo *root,
 				cur_em->em_is_const)
 				continue;
 
-			if (!ignore_relabel_type &&
+			if (ignore_relabel_type &&
 				em_expr && IsA(em_expr, RelabelType))
 			{
 				while (em_expr && IsA(em_expr, RelabelType))

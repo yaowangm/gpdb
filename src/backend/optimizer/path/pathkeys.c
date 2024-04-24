@@ -1551,7 +1551,7 @@ cdb_pull_up_eclass(PlannerInfo *root,
 										0,
 										relids,
 										true,
-										false);
+										true);
 
 	return outer_ec;
 }
