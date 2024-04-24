@@ -574,6 +574,31 @@ add_eq_member(EquivalenceClass *ec, Expr *expr, Relids relids,
 }
 
 
+/* Wrapper function of get_eclass_for_sort_expr_real() */
+EquivalenceClass *
+get_eclass_for_sort_expr(PlannerInfo *root,
+						 Expr *expr,
+						 Relids nullable_relids,
+						 List *opfamilies,
+						 Oid opcintype,
+						 Oid collation,
+						 Index sortref,
+						 Relids rel,
+						 bool create_it)
+{
+	return get_eclass_for_sort_expr_real(root,
+										expr,
+										nullable_relids,
+										opfamilies,
+										opcintype,
+										collation,
+										sortref,
+										rel,
+										create_it,
+										/* ignore_relabel_type is true by default */
+										true);
+}
+
 /*
  * get_eclass_for_sort_expr
  *	  Given an expression and opfamily/collation info, find an existing
@@ -613,7 +638,7 @@ add_eq_member(EquivalenceClass *ec, Expr *expr, Relids relids,
  * generating poor (but not incorrect) plans.
  */
 EquivalenceClass *
-get_eclass_for_sort_expr(PlannerInfo *root,
+get_eclass_for_sort_expr_real(PlannerInfo *root,
 						 Expr *expr,
 						 Relids nullable_relids,
 						 List *opfamilies,
@@ -621,7 +646,8 @@ get_eclass_for_sort_expr(PlannerInfo *root,
 						 Oid collation,
 						 Index sortref,
 						 Relids rel,
-						 bool create_it)
+						 bool create_it,
+						 bool ignore_relabel_type)
 {
 	Relids		expr_relids;
 	EquivalenceClass *newec;
@@ -633,6 +659,12 @@ get_eclass_for_sort_expr(PlannerInfo *root,
 	 * Ensure the expression exposes the correct type and collation.
 	 */
 	expr = canonicalize_ec_expression(expr, opcintype, collation);
+
+	if (!ignore_relabel_type)
+	{
+		while (IsA(expr, RelabelType))
+			expr = (Expr *) ((RelabelType *) expr)->arg;
+	}
 
 	/*
 	 * Scan through the existing EquivalenceClasses for a match
@@ -658,6 +690,7 @@ get_eclass_for_sort_expr(PlannerInfo *root,
 		foreach(lc2, cur_ec->ec_members)
 		{
 			EquivalenceMember *cur_em = (EquivalenceMember *) lfirst(lc2);
+			Expr *em_expr = cur_em->em_expr;
 
 			/*
 			 * Ignore child members unless they match the request.
@@ -673,6 +706,15 @@ get_eclass_for_sort_expr(PlannerInfo *root,
 			if (cur_ec->ec_below_outer_join &&
 				cur_em->em_is_const)
 				continue;
+
+			if (!ignore_relabel_type &&
+				em_expr && IsA(em_expr, RelabelType))
+			{
+				while (em_expr && IsA(em_expr, RelabelType))
+					em_expr = (Expr*) ((RelabelType *) em_expr)->arg;
+				if (equal(expr, em_expr))
+					return cur_ec;
+			}
 
 			if (opcintype == cur_em->em_datatype &&
 				equal(expr, cur_em->em_expr))

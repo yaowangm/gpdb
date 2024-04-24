@@ -1542,7 +1542,7 @@ cdb_pull_up_eclass(PlannerInfo *root,
 	 * It should be OK to set nullable_relids = NULL, since this eclass is only
 	 * used for DistributionKey, so it would not participate in qual deduction.
 	 */
-	outer_ec = get_eclass_for_sort_expr(root,
+	outer_ec = get_eclass_for_sort_expr_real(root,
 										newexpr,
 										NULL,
 										eclass->ec_opfamilies,
@@ -1550,7 +1550,8 @@ cdb_pull_up_eclass(PlannerInfo *root,
 										exprCollation((Node *) newexpr),
 										0,
 										relids,
-										true);
+										true,
+										false);
 
 	return outer_ec;
 }
