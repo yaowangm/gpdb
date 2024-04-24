@@ -643,15 +643,15 @@ get_eclass_for_sort_expr(PlannerInfo *root,
  */
 EquivalenceClass *
 get_eclass_for_sort_expr_real(PlannerInfo *root,
-						 	 Expr *expr,
-						 	 Relids nullable_relids,
-						 	 List *opfamilies,
-						 	 Oid opcintype,
-						 	 Oid collation,
-						 	 Index sortref,
-						 	 Relids rel,
-						 	 bool create_it,
-						 	 bool ignore_relabel_type)
+							  Expr *expr,
+							  Relids nullable_relids,
+							  List *opfamilies,
+							  Oid opcintype,
+							  Oid collation,
+							  Index sortref,
+							  Relids rel,
+							  bool create_it,
+							  bool ignore_relabel_type)
 {
 	Relids		expr_relids;
 	EquivalenceClass *newec;
