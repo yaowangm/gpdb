@@ -4252,3 +4252,19 @@ PARTITION BY RANGE (year)
   DEFAULT PARTITION outlying_years );
 
 drop table p3_sales;
+
+-- test the behavior of get_eclass_for_sort_expr_real() to match exprs
+-- by ignoring outer RelabelType
+CREATE TABLE tb_part (id varchar(32), date_col date)
+  DISTRIBUTED BY (id)
+  PARTITION BY RANGE (date_col)
+  (START (date '2016-01-01') INCLUSIVE
+   END (date '2016-01-02') EXCLUSIVE
+   EVERY (INTERVAL '1 day'));
+CREATE TABLE tb_join (id varchar(32)) DISTRIBUTED BY (id);
+analyze tb_part;
+analyze tb_join;
+EXPLAIN(COSTS OFF) SELECT COUNT(*) FROM tb_part JOIN tb_join USING(id);
+
+drop table tb_part;
+drop table tb_join;
