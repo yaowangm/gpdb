@@ -4253,18 +4253,21 @@ PARTITION BY RANGE (year)
 
 drop table p3_sales;
 
--- test the behavior of get_eclass_for_sort_expr_real() to match exprs
--- by ignoring outer RelabelType
-CREATE TABLE tb_part (id varchar(32), date_col date)
-  DISTRIBUTED BY (id)
-  PARTITION BY RANGE (date_col)
-  (START (date '2016-01-01') INCLUSIVE
-   END (date '2016-01-02') EXCLUSIVE
-   EVERY (INTERVAL '1 day'));
-CREATE TABLE tb_join (id varchar(32)) DISTRIBUTED BY (id);
-analyze tb_part;
-analyze tb_join;
-EXPLAIN(COSTS OFF) SELECT COUNT(*) FROM tb_part JOIN tb_join USING(id);
+-- Test the case to generate correct plan without extra Redistribute Motion
+-- node when joining a partition table to another normal table
+-- See issue https://github.com/greenplum-db/gpdb/issues/14775
+create table tb_part (id varchar(32), t varchar(32))
+distributed by (id)
+partition by range(t)
+(
+  partition p1 start ('0') end ('100'),
+  partition p2 start ('101') end ('201')
+);
+
+create table tb_spl (id varchar(32), t varchar(32))
+distributed by (id);
+
+explain (costs off) select * from tb_spl a join tb_part b on a.id = b.id;
 
 drop table tb_part;
-drop table tb_join;
+drop table tb_spl;

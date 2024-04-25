@@ -664,6 +664,7 @@ get_eclass_for_sort_expr_real(PlannerInfo *root,
 	 */
 	expr = canonicalize_ec_expression(expr, opcintype, collation);
 
+	/* Get real expr by ignoring outer RelabelType */
 	if (ignore_relabel_type)
 	{
 		while (IsA(expr, RelabelType))
@@ -711,17 +712,19 @@ get_eclass_for_sort_expr_real(PlannerInfo *root,
 				cur_em->em_is_const)
 				continue;
 
-			if (ignore_relabel_type &&
-				em_expr && IsA(em_expr, RelabelType))
+			/* Get real expr by ignoring outer RelabelType */
+			if (ignore_relabel_type)
 			{
 				while (em_expr && IsA(em_expr, RelabelType))
 					em_expr = (Expr*) ((RelabelType *) em_expr)->arg;
-				if (equal(expr, em_expr))
-					return cur_ec;
 			}
 
-			if (opcintype == cur_em->em_datatype &&
-				equal(expr, cur_em->em_expr))
+			/* If ignore_relabel_type is false, check datatype firstly  */
+			if (!ignore_relabel_type &&
+				opcintype != cur_em->em_datatype)
+				continue;
+
+			if (equal(expr, em_expr))
 				return cur_ec;	/* Match! */
 		}
 	}
