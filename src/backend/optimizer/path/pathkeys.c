@@ -1543,15 +1543,15 @@ cdb_pull_up_eclass(PlannerInfo *root,
 	 * used for DistributionKey, so it would not participate in qual deduction.
 	 */
 	outer_ec = get_eclass_for_sort_expr_real(root,
-										newexpr,
-										NULL,
-										eclass->ec_opfamilies,
-										exprType((Node *) newexpr),
-										exprCollation((Node *) newexpr),
-										0,
-										relids,
-										true,
-										true);
+											 newexpr,
+											 NULL,
+											 eclass->ec_opfamilies,
+											 exprType((Node *) newexpr),
+											 exprCollation((Node *) newexpr),
+											 0,
+											 relids,
+											 true,
+											 true);
 
 	return outer_ec;
 }
