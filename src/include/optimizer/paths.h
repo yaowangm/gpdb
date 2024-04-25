@@ -143,7 +143,7 @@ extern EquivalenceClass *get_eclass_for_sort_expr_real(PlannerInfo *root,
 													   List *opfamilies,
 													   Oid opcintype,
 													   Oid collation,
-													   sortref,
+													   Index sortref,
 													   Relids rel,
 													   bool create_it,
 													   bool ignore_relabel_type);
