@@ -600,7 +600,7 @@ get_eclass_for_sort_expr(PlannerInfo *root,
 }
 
 /*
- * get_eclass_for_sort_expr
+ * get_eclass_for_sort_expr_real
  *	  Given an expression and opfamily/collation info, find an existing
  *	  equivalence class it is a member of; if none, optionally build a new
  *	  single-member EquivalenceClass for it.
@@ -719,7 +719,7 @@ get_eclass_for_sort_expr_real(PlannerInfo *root,
 					em_expr = (Expr*) ((RelabelType *) em_expr)->arg;
 			}
 
-			/* If ignore_relabel_type is false, check datatype firstly  */
+			/* If ignore_relabel_type is false, check datatype firstly */
 			if (!ignore_relabel_type &&
 				opcintype != cur_em->em_datatype)
 				continue;
