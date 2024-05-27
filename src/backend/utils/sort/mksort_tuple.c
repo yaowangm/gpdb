@@ -194,6 +194,7 @@ mksort_tuple(SortTuple           *x,
 	int32 dist;
 	SortTuple *pivot;
 	bool isDatumNull;
+	bool strictOrdered = true;
 
 	Assert(depth <= state->nKeys);
 	Assert(state->sortKeys);
@@ -211,8 +212,31 @@ mksort_tuple(SortTuple           *x,
 	if (QueryFinishPending)
 		return;
 
-	/* Select pivot by random and move it to the first position */
-	lessStart = ((int64)((float8) random() / (float8) MAX_RANDOM_VALUE)) % n;
+	/*
+	 * Check if the array is ordered already. If yes, return immediately.
+	 * Different from qsort_tuple(), the array must be strict ordered (no
+	 * equal datums). If there are equal datums, we must continue the mksort
+	 * process to check datums on lower depth.
+	 */
+	for (int i = 0;i < n - 1;i++)
+	{
+		int ret;
+
+		ret = mksort_compare_datum(x + i,
+								   x + i + 1,
+								   depth,
+								   state);
+		if(ret >= 0)
+		{
+			strictOrdered = false;
+			break;
+		}
+	}
+	if (strictOrdered)
+		return;
+
+	/* Select pivot at the middle of x and move it to the first position */
+	lessStart = n / 2;
 	mksort_swap(0, lessStart, x);
 	pivot = x;
 
